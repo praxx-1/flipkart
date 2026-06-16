@@ -1,0 +1,6 @@
+Case,Name,Event_Cause,Corridor,Zone,Priority,Duration_Hours,Impact_Score,Officers,Officer_Range,Barricade_Count,Barricade_Level,Diversion_Level,Primary_Route,Setup_Hours,Cleanup_Hours,Total_Impact_Hours
+1,Public Event,public_event,Non-corridor,West Zone 2,Low,0.0,8.0,42,35-50,3,HEAVY,HEAVY,ORR,2,1.5,3.510048333333333
+2,Accident (High Priority),accident,Tumkur Road,West Zone 1,High,1.0,9.07,60,50-70,2,FULL,CRITICAL,ORR North,3,2.0,6.0
+3,Construction Project,construction,ORR North 1,East Zone 2,High,1.0,8.57,60,50-70,2,FULL,CRITICAL,ORR,3,2.0,6.0
+4,VIP/Procession,procession,Magadi Road,Unknown,High,1.0,10.0,60,50-70,2,FULL,CRITICAL,ORR,3,2.0,6.0
+5,Vehicle Breakdown,vehicle_breakdown,Bannerghata Road,Unknown,High,1.0,8.07,60,50-70,2,FULL,CRITICAL,ORR,3,2.0,6.0
