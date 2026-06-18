@@ -89,7 +89,8 @@ with tab1:
         event_cause = st.selectbox(
             "Event Type",
             options=['public_event', 'accident', 'construction', 'vip_movement', 
-                    'procession', 'vehicle_breakdown', 'pot_holes', 'others'],
+                    'procession', 'vehicle_breakdown', 'pot_hole', 'water_logging',
+                    'tree_fall', 'congestion'],
             help="Select the type of event"
         )
         
