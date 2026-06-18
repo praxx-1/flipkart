@@ -1,635 +1,398 @@
 """
-PHASE 4: RECOMMENDATION ENGINE
-Convert Impact Score (0-10) → Actionable Police Recommendations
+PHASE 4: CONTEXTUAL RECOMMENDATION ENGINE
+Convert a numeric event impact score into deployable traffic-police actions.
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-# ============================================================================
-# RECOMMENDATION ENGINE CLASS
-# ============================================================================
 
 class RecommendationEngine:
     """
-    Converts predicted congestion impact score into actionable recommendations
-    for traffic police deployment and management.
+    Uses event severity, road capacity, local traffic flow, congestion spread,
+    time of day, and deployment logistics to recommend realistic actions.
     """
-    
+
     def __init__(self):
-        """Initialize corridor and zone mappings"""
-        
-        # Major corridors and their alternate routes
         self.corridor_diversions = {
-            'Mysore Road': ['HSR Layout', 'Sankey Road', 'ORR'],
-            'Bellary Road 1': ['Sankey Road', 'Whitefield Road'],
-            'Bellary Road 2': ['Outer Ring Road', 'Bangalore-Mysore Road'],
-            'ORR North': ['White Field Road', 'Hebbal Bypass'],
-            'ORR East 1': ['Koramangala', 'Sarjapur Road'],
-            'ORR East 2': ['Whitefield Road', 'Marathahalli Bridge'],
-            'CBD-2': ['ORR North', 'ORR South', 'HSR Layout'],
-            'Bangalore-Mysore Road': ['Tumkur Road', 'Hosur Road'],
-            'Hosur Road': ['Sarjapur Road', 'Bannerghatta Road'],
-            'Tumkur Road': ['ORR North', 'Peenya Industrial Area']
+            "Mysore Road": ["NICE Road", "Magadi Road", "Kanakapura Road"],
+            "Bellary Road 1": ["Sankey Road", "Palace Road", "Hebbal service road"],
+            "Bellary Road 2": ["Tumkur Road", "Yeshwanthpur", "Hebbal service road"],
+            "ORR North": ["Hebbal service road", "Thanisandra Main Road", "Hennur Road"],
+            "ORR East 1": ["Sarjapur Road", "Old Airport Road", "Inner Ring Road"],
+            "ORR East 2": ["Whitefield Road", "Varthur Road", "Old Airport Road"],
+            "CBD-2": ["Sankey Road", "Richmond Road", "Residency Road"],
+            "Bangalore-Mysore Road": ["NICE Road", "Kanakapura Road", "Magadi Road"],
+            "Hosur Road": ["Bannerghatta Road", "Sarjapur Road", "Electronic City service road"],
+            "Tumkur Road": ["Jalahalli Road", "Peenya Industrial Area", "BEL Road"],
+            "Non-corridor": ["Nearest parallel road", "Nearest arterial road", "Local service lane"],
         }
-        
-        # Critical barricade points by corridor
+
         self.barricade_points = {
-            'Mysore Road': ['Hegde Nagar Junction', 'Langford Town', 'Cox Town'],
-            'Bellary Road 1': ['Sankey Road Junction', 'Jeevan Bhima Nagar'],
-            'Bellary Road 2': ['Sankey Road Junction', 'Yeshwantpur Station'],
-            'ORR North': ['Hebbal Junction', 'Yelahanka Junction'],
-            'ORR East 1': ['Koramangala Junction', 'Indiranagar'],
-            'ORR East 2': ['Marathahalli Bridge', 'Whitefield Junction'],
-            'CBD-2': ['Queens Statue Circle', 'Sankey Road', 'Ulsoor Lake'],
-            'Bangalore-Mysore Road': ['Tumkur Road Junction', 'Electronic City'],
-            'Hosur Road': ['Koramangala Junction', 'Sarjapur Road Junction'],
-            'Tumkur Road': ['Jalahalli Junction', 'Peenya Junction']
+            "Mysore Road": ["Nayandahalli Junction", "Kengeri Junction", "BHEL Junction"],
+            "Bellary Road 1": ["Mekhri Circle", "Palace Grounds", "Hebbal Junction"],
+            "Bellary Road 2": ["Hebbal Junction", "Yelahanka Junction", "Airport Road merge"],
+            "ORR North": ["Hebbal Junction", "Nagavara Junction", "Hennur Junction"],
+            "ORR East 1": ["Silk Board Junction", "Iblur Junction", "Bellandur Gate"],
+            "ORR East 2": ["Marathahalli Bridge", "Kadubeesanahalli", "KR Puram merge"],
+            "CBD-2": ["Queens Circle", "Corporation Circle", "Richmond Circle"],
+            "Bangalore-Mysore Road": ["Nayandahalli Junction", "Kengeri Junction", "Bidadi approach"],
+            "Hosur Road": ["Silk Board Junction", "Bommanahalli Junction", "Electronic City Toll"],
+            "Tumkur Road": ["Goraguntepalya", "Peenya Junction", "Jalahalli Cross"],
+            "Non-corridor": ["Incident point", "Upstream junction", "Downstream junction"],
         }
-    
-    # ========================================================================
-    # CORE RECOMMENDATION LOGIC
-    # ========================================================================
-    
-    def recommend(self, impact_score: float, 
-                  event_type: str = None,
-                  corridor: str = None,
-                  zone: str = None,
-                  duration_hours: float = None) -> Dict:
-        """
-        Generate recommendations based on impact score and event details.
-        
-        Args:
-            impact_score: Predicted impact (0-10)
-            event_type: Type of event (public_event, accident, etc.)
-            corridor: Affected corridor
-            zone: Administrative zone
-            duration_hours: Expected event duration
-            
-        Returns:
-            Dictionary with complete recommendations
-        """
-        
-        # Round score to 1 decimal
-        impact_score = round(impact_score, 1)
-        
-        # Clamp to 0-10 range
-        impact_score = max(0, min(10, impact_score))
-        
-        # Normalise event_type string
-        event_type_clean = str(event_type).lower().strip() if event_type else ''
 
-        # Get manpower recommendation
-        manpower = self._recommend_manpower(impact_score, event_type_clean)
-        
-        # Get barricade locations
-        barricades = self._recommend_barricades(impact_score, corridor, event_type_clean)
-        
-        # Get diversion routes
-        diversions = self._recommend_diversions(impact_score, corridor, event_type_clean)
-        
-        # Get setup/cleanup times
-        setup_cleanup = self._recommend_timing(impact_score, duration_hours, event_type_clean)
-        
-        # Get impact category
-        category = self._categorize_impact(impact_score)
-        
-        # Build recommendation object
-        recommendation = {
-            'impact_score': impact_score,
-            'category': category,
-            'manpower': manpower,
-            'barricades': barricades,
-            'diversions': diversions,
-            'setup_cleanup': setup_cleanup,
-            'summary': self._build_summary(impact_score, manpower, barricades, corridor)
+        self.location_profiles = {
+            "Mysore Road": self._road_profile(0.76, 0.67, 6, 2.8, 24, "NH-275 radial corridor with heavy commuter and freight mixing."),
+            "Bellary Road 1": self._road_profile(0.78, 0.72, 6, 2.5, 22, "Airport-side arterial with high weekday commuter demand."),
+            "Bellary Road 2": self._road_profile(0.74, 0.70, 6, 2.3, 25, "North Bengaluru airport approach and suburban connector."),
+            "ORR North": self._road_profile(0.82, 0.68, 6, 3.4, 26, "Outer Ring Road section around Hebbal/Nagavara with recurring choke points."),
+            "ORR East 1": self._road_profile(0.94, 0.62, 6, 5.2, 28, "IT-corridor ORR section around Silk Board, Iblur, Bellandur and Sarjapur links."),
+            "ORR East 2": self._road_profile(0.96, 0.60, 6, 5.6, 30, "Marathahalli/Whitefield ORR section where closures can spill across parallel roads."),
+            "CBD-2": self._road_profile(0.88, 0.48, 4, 3.2, 18, "Central business district roads with dense junction spacing and limited spare capacity."),
+            "Bangalore-Mysore Road": self._road_profile(0.72, 0.76, 6, 2.4, 24, "Inter-city radial road with comparatively better carriageway capacity."),
+            "Hosur Road": self._road_profile(0.86, 0.66, 6, 3.8, 25, "Electronic City and Silk Board approach corridor."),
+            "Tumkur Road": self._road_profile(0.78, 0.74, 6, 2.7, 26, "Industrial and highway approach corridor with freight movement."),
+            "Non-corridor": self._road_profile(0.55, 0.42, 2, 1.2, 20, "Local road profile; confirm exact geometry before final deployment."),
         }
-        
-        return recommendation
-    
-    # ========================================================================
-    # EVENT TYPE PROFILES
-    # Each event type has a base manpower range, barricade need, and
-    # diversion need that OVERRIDES the generic score-only logic.
-    # Priority (High/Medium/Low) is used as a MULTIPLIER within the profile.
-    # ========================================================================
 
-    def _get_event_profile(self, event_type: str) -> Dict:
-        """
-        Return a realistic deployment profile per event type.
-        Fields:
-          - needs_police: Whether police traffic deployment is relevant
-          - base_officers: Realistic recommended officers (not inflated)
-          - officer_range: (min, max) realistic range
-          - barricade_need: 'none' | 'low' | 'medium' | 'high'
-          - diversion_need: 'none' | 'low' | 'medium' | 'high'
-          - notes: human-readable context
-        """
-        profiles = {
-            # ── Planned Events ──────────────────────────────────────────────
-            'vip_movement': {
-                'needs_police': True,
-                'base_officers': 20,
-                'officer_range': (15, 30),
-                'barricade_need': 'high',
-                'diversion_need': 'high',
-                'notes': 'VIP security escort + route clearance required'
-            },
-            'procession': {
-                'needs_police': True,
-                'base_officers': 18,
-                'officer_range': (12, 25),
-                'barricade_need': 'high',
-                'diversion_need': 'high',
-                'notes': 'Crowd control + route management needed'
-            },
-            'public_event': {
-                'needs_police': True,
-                'base_officers': 12,
-                'officer_range': (8, 20),
-                'barricade_need': 'medium',
-                'diversion_need': 'medium',
-                'notes': 'Crowd & parking management, perimeter control'
-            },
-            # ── Unplanned / Infrastructure ───────────────────────────────
-            'accident': {
-                'needs_police': True,
-                'base_officers': 6,
-                'officer_range': (4, 10),
-                'barricade_need': 'medium',
-                'diversion_need': 'medium',
-                'notes': 'Scene management + traffic flow around incident'
-            },
-            'construction': {
-                'needs_police': False,
-                'base_officers': 3,
-                'officer_range': (2, 6),
-                'barricade_need': 'medium',
-                'diversion_need': 'medium',
-                'notes': 'Construction crew handles safety; 1-2 officers for flow'
-            },
-            'vehicle_breakdown': {
-                'needs_police': False,
-                'base_officers': 2,
-                'officer_range': (1, 4),
-                'barricade_need': 'low',
-                'diversion_need': 'low',
-                'notes': 'Tow truck + minor traffic management; minimal police'
-            },
-            'pot_hole': {
-                'needs_police': False,
-                'base_officers': 1,
-                'officer_range': (0, 2),
-                'barricade_need': 'low',
-                'diversion_need': 'none',
-                'notes': 'BBMP/maintenance team; police rarely needed'
-            },
-            'water_logging': {
-                'needs_police': True,
-                'base_officers': 4,
-                'officer_range': (3, 8),
-                'barricade_need': 'medium',
-                'diversion_need': 'medium',
-                'notes': 'Route diversion + safety control required'
-            },
-            'tree_fall': {
-                'needs_police': False,
-                'base_officers': 2,
-                'officer_range': (1, 4),
-                'barricade_need': 'low',
-                'diversion_need': 'low',
-                'notes': 'BBMP clears; minimal traffic control needed'
-            },
-            'congestion': {
-                'needs_police': True,
-                'base_officers': 5,
-                'officer_range': (3, 8),
-                'barricade_need': 'low',
-                'diversion_need': 'medium',
-                'notes': 'Signal management + diversion advisory'
-            },
+        self.event_profiles = {
+            "vip_movement": self._event_profile(8.6, 1.35, 1.20, 1.50, True, "Route sanitisation, escort movement and rolling closures."),
+            "procession": self._event_profile(8.2, 1.45, 1.35, 1.35, True, "Moving crowd, slow route occupation and public-order control."),
+            "public_event": self._event_profile(7.0, 1.25, 1.10, 1.15, True, "Crowd arrival/departure waves, parking friction and pedestrian spillover."),
+            "accident": self._event_profile(6.1, 0.55, 1.00, 0.80, False, "Scene protection, ambulance access and lane discipline."),
+            "construction": self._event_profile(5.5, 0.35, 0.95, 0.65, True, "Work-zone channelisation and temporary lane loss."),
+            "vehicle_breakdown": self._event_profile(3.8, 0.12, 0.65, 0.35, False, "Short-duration lane obstruction until towing."),
+            "pot_hole": self._event_profile(2.8, 0.05, 0.45, 0.20, False, "Maintenance-led spot hazard with low police need."),
+            "water_logging": self._event_profile(6.8, 0.20, 1.25, 0.90, False, "Capacity drops quickly and two-wheelers slow/avoid flooded lanes."),
+            "tree_fall": self._event_profile(4.8, 0.10, 0.85, 0.45, False, "Clearance-led blockage; police mainly hold upstream flow."),
+            "congestion": self._event_profile(5.2, 0.00, 1.20, 0.55, False, "Signal management, queue protection and advisory diversions."),
         }
-        # Fallback for unknown types
-        return profiles.get(event_type, {
-            'needs_police': True,
-            'base_officers': 5,
-            'officer_range': (3, 10),
-            'barricade_need': 'low',
-            'diversion_need': 'low',
-            'notes': 'Standard traffic management'
-        })
 
-    def _priority_multiplier(self, impact_score: float) -> float:
-        """
-        Convert impact score into a priority multiplier (0.8 – 1.5).
-        VIP at score 6 still gets more resources than pot_hole at score 9
-        because the event profile caps the base differently.
-        """
-        if impact_score >= 9:
-            return 1.5
-        elif impact_score >= 7:
-            return 1.2
-        elif impact_score >= 5:
-            return 1.0
-        else:
-            return 0.8
+        self.web_context_sources = [
+            "https://en.wikipedia.org/wiki/Outer_Ring_Road,_Bengaluru",
+            "https://en.wikipedia.org/wiki/Silk_Board_junction",
+            "https://timesofindia.indiatimes.com/city/bengaluru/rain-disrupts-orr-traffic/articleshow/121736538.cms",
+            "https://timesofindia.indiatimes.com/city/bengaluru/road-closures-fuel-hours-long-gridlock-on-bengalurus-outer-ring-road/articleshow/124612228.cms",
+        ]
 
-    # ========================================================================
-    # MANPOWER RECOMMENDATION
-    # ========================================================================
+    def _road_profile(self, traffic_flow: float, capacity: float, lanes: int, spread_km: float, response_min: int, notes: str) -> Dict:
+        return {
+            "traffic_flow_index": traffic_flow,
+            "road_capacity_index": capacity,
+            "lanes": lanes,
+            "typical_spread_km": spread_km,
+            "base_response_minutes": response_min,
+            "notes": notes,
+        }
 
-    def _recommend_manpower(self, score: float, event_type: str = '') -> Dict:
-        """Recommend police officer deployment based on event type + impact score"""
+    def _event_profile(self, value: float, crowd_load: float, blockage: float, police_complexity: float, planned: bool, notes: str) -> Dict:
+        return {
+            "event_value": value,
+            "crowd_load": crowd_load,
+            "blockage_factor": blockage,
+            "police_complexity": police_complexity,
+            "planned": planned,
+            "notes": notes,
+        }
 
-        profile = self._get_event_profile(event_type)
-        multiplier = self._priority_multiplier(score)
+    def recommend(
+        self,
+        impact_score: float,
+        event_type: Optional[str] = None,
+        corridor: Optional[str] = None,
+        zone: Optional[str] = None,
+        duration_hours: Optional[float] = None,
+        hour: Optional[int] = None,
+        crowd_size: int = 0,
+        road_closure: bool = False,
+        affected_length_km: Optional[float] = None,
+        live_traffic_index: Optional[float] = None,
+    ) -> Dict:
+        event_type_clean = str(event_type).lower().strip() if event_type else "congestion"
+        corridor_key = corridor if corridor in self.location_profiles else "Non-corridor"
+        duration_hours = duration_hours if duration_hours is not None else 1.0
+        hour = 12 if hour is None else int(hour) % 24
 
-        base = profile['base_officers']
-        lo, hi = profile['officer_range']
+        event_profile = self.event_profiles.get(event_type_clean, self.event_profiles["congestion"])
+        road_profile = self.location_profiles[corridor_key]
+        context = self._contextual_assessment(
+            base_score=impact_score,
+            event_profile=event_profile,
+            road_profile=road_profile,
+            duration_hours=duration_hours,
+            hour=hour,
+            crowd_size=crowd_size,
+            road_closure=road_closure,
+            affected_length_km=affected_length_km,
+            live_traffic_index=live_traffic_index,
+        )
 
-        recommended = max(lo, min(hi, round(base * multiplier)))
-
-        if not profile['needs_police']:
-            level = 'MONITORING'
-            description = f"Police monitoring optional. {profile['notes']}"
-        elif recommended <= 3:
-            level = 'MINIMAL'
-            description = profile['notes']
-        elif recommended <= 8:
-            level = 'LOW'
-            description = profile['notes']
-        elif recommended <= 15:
-            level = 'MODERATE'
-            description = profile['notes']
-        elif recommended <= 22:
-            level = 'HIGH'
-            description = profile['notes']
-        else:
-            level = 'CRITICAL'
-            description = profile['notes']
+        score = context["contextual_impact_score"]
+        manpower = self._recommend_manpower(score, event_profile, road_profile, context)
+        barricades = self._recommend_barricades(score, corridor_key, event_profile, context)
+        diversions = self._recommend_diversions(score, corridor_key, event_profile, context)
+        timing = self._recommend_timing(score, duration_hours, event_profile, road_profile, context, manpower, barricades)
+        category = self._categorize_impact(score)
 
         return {
-            'min_officers': lo,
-            'max_officers': hi,
-            'recommended': recommended,
-            'level': level,
-            'needs_police': profile['needs_police'],
-            'description': description
+            "impact_score": score,
+            "base_impact_score": round(max(0, min(10, impact_score)), 1),
+            "category": category,
+            "manpower": manpower,
+            "barricades": barricades,
+            "diversions": diversions,
+            "setup_cleanup": timing,
+            "context": context,
+            "web_context_sources": self.web_context_sources,
+            "summary": self._build_summary(score, manpower, barricades, timing, context, corridor_key, zone),
         }
 
-    # ========================================================================
-    # BARRICADE RECOMMENDATION
-    # ========================================================================
-    
-    def _recommend_barricades(self, score: float, corridor: str = None, event_type: str = '') -> Dict:
-        """Recommend barricade locations and extent based on event type + score"""
-        
-        # Get corridor-specific barricades
-        if corridor and corridor in self.barricade_points:
-            corridor_barricades = self.barricade_points[corridor]
+    def _contextual_assessment(
+        self,
+        base_score: float,
+        event_profile: Dict,
+        road_profile: Dict,
+        duration_hours: float,
+        hour: int,
+        crowd_size: int,
+        road_closure: bool,
+        affected_length_km: Optional[float],
+        live_traffic_index: Optional[float],
+    ) -> Dict:
+        base_score = max(0, min(10, float(base_score)))
+        traffic_flow = road_profile["traffic_flow_index"] if live_traffic_index is None else max(0, min(1, live_traffic_index))
+        capacity = max(0.15, road_profile["road_capacity_index"])
+        capacity_pressure = max(0, traffic_flow - capacity + 0.35)
+
+        if 7 <= hour <= 10 or 16 <= hour <= 20:
+            time_factor = 1.22
+            time_label = "Peak commute"
+        elif 22 <= hour or hour <= 5:
+            time_factor = 0.68
+            time_label = "Night"
+        elif 11 <= hour <= 15:
+            time_factor = 0.92
+            time_label = "Midday"
         else:
-            corridor_barricades = ['Main junction', 'Secondary junction']
+            time_factor = 1.0
+            time_label = "Shoulder hour"
 
-        profile = self._get_event_profile(event_type)
-        need = profile['barricade_need']  # 'none' | 'low' | 'medium' | 'high'
+        night_gathering_factor = 1.15 if time_label == "Night" and crowd_size >= 500 else 1.0
+        crowd_pressure = min(1.35, crowd_size / 10000) * event_profile["crowd_load"]
+        duration_pressure = min(1.0, duration_hours / 6) * 0.55
+        closure_pressure = 1.35 if road_closure else 0.0
+        spread_km = affected_length_km if affected_length_km is not None else road_profile["typical_spread_km"]
+        spread_pressure = min(1.25, spread_km / max(1.0, road_profile["typical_spread_km"])) * 0.8
 
-        # Events that almost never need barricades
-        if need == 'none' or event_type in ('pot_hole', 'tree_fall'):
-            return {
-                'count': 0,
-                'locations': [],
-                'level': 'NONE',
-                'description': 'No barricades needed — maintenance crew handles the site'
-            }
+        contextual_score = (
+            (base_score * 0.45)
+            + (event_profile["event_value"] * 0.22)
+            + (traffic_flow * 2.2)
+            + (capacity_pressure * 1.6)
+            + event_profile["blockage_factor"]
+            + crowd_pressure
+            + duration_pressure
+            + closure_pressure
+            + spread_pressure
+        ) * time_factor * night_gathering_factor
 
-        # Low-need events: at most 1 cone/barrier at the spot
-        if need == 'low':
-            return {
-                'count': 1,
-                'locations': corridor_barricades[:1],
-                'level': 'MINIMAL',
-                'description': 'Single barrier/cone at incident spot'
-            }
-
-        # Medium-need events (accidents, construction, water-logging)
-        if need == 'medium':
-            if score >= 8:
-                return {
-                    'count': 2,
-                    'locations': corridor_barricades[:2],
-                    'level': 'MODERATE',
-                    'description': 'Barricade incident zone + upstream junction'
-                }
-            else:
-                return {
-                    'count': 1,
-                    'locations': corridor_barricades[:1],
-                    'level': 'MINIMAL',
-                    'description': 'Single barrier at incident point'
-                }
-
-        # High-need events (VIP, procession, public_event)
-        if score >= 9:
-            return {
-                'count': len(corridor_barricades),
-                'locations': corridor_barricades,
-                'level': 'FULL',
-                'description': 'Full route barricading, all junctions controlled'
-            }
-        elif score >= 7:
-            return {
-                'count': min(3, len(corridor_barricades)),
-                'locations': corridor_barricades[:3],
-                'level': 'HEAVY',
-                'description': 'Major junctions barricaded along route'
-            }
-        else:
-            return {
-                'count': 2,
-                'locations': corridor_barricades[:2],
-                'level': 'MODERATE',
-                'description': 'Entry & exit points barricaded'
-            }
-    
-    # ========================================================================
-    # DIVERSION ROUTE RECOMMENDATION
-    # ========================================================================
-    
-    def _recommend_diversions(self, score: float, corridor: str = None, event_type: str = '') -> Dict:
-        """Recommend alternate routes for traffic diversion based on event type + score"""
-        
-        # Get corridor-specific diversions
-        if corridor and corridor in self.corridor_diversions:
-            available_routes = self.corridor_diversions[corridor]
-        else:
-            available_routes = ['ORR', 'HSR Layout', 'Whitefield Road']
-
-        profile = self._get_event_profile(event_type)
-        need = profile['diversion_need']  # 'none' | 'low' | 'medium' | 'high'
-
-        # Events that don't affect through traffic at all
-        if need == 'none':
-            return {
-                'primary': None,
-                'secondary': None,
-                'level': 'NONE',
-                'description': 'No diversion needed — spot repair, traffic flows normally'
-            }
-
-        # Minor incidents: advisory only
-        if need == 'low':
-            return {
-                'primary': available_routes[0] if available_routes else 'Parallel Road',
-                'secondary': None,
-                'level': 'ADVISORY',
-                'description': f'Optional advisory diversion via {available_routes[0] if available_routes else "alternate route"}'
-            }
-
-        # Medium need (accidents, construction, water-logging, congestion)
-        if need == 'medium':
-            if score >= 8:
-                return {
-                    'primary': available_routes[0] if available_routes else 'ORR',
-                    'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
-                    'level': 'MODERATE',
-                    'description': f'Divert via {available_routes[0] if available_routes else "ORR"} and {available_routes[1] if len(available_routes) > 1 else "HSR Layout"}'
-                }
-            else:
-                return {
-                    'primary': available_routes[0] if available_routes else 'ORR',
-                    'secondary': None,
-                    'level': 'MINIMAL',
-                    'description': f'Minor diversion via {available_routes[0] if available_routes else "alternate route"}'
-                }
-
-        # High need (VIP, procession, major public event)
-        if score >= 9:
-            return {
-                'primary': available_routes[0] if available_routes else 'ORR North',
-                'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
-                'tertiary': available_routes[2] if len(available_routes) > 2 else 'Whitefield Road',
-                'level': 'CRITICAL',
-                'description': 'Full route clearance — all alternate corridors activated'
-            }
-        elif score >= 7:
-            return {
-                'primary': available_routes[0] if available_routes else 'ORR',
-                'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
-                'level': 'HEAVY',
-                'description': f'Heavy diversion via {available_routes[0] if available_routes else "ORR"} and {available_routes[1] if len(available_routes) > 1 else "HSR Layout"}'
-            }
-        else:
-            return {
-                'primary': available_routes[0] if available_routes else 'ORR',
-                'secondary': None,
-                'level': 'MODERATE',
-                'description': f'Divert traffic via {available_routes[0] if available_routes else "alternate route"}'
-            }
-    
-    # ========================================================================
-    # TIMING RECOMMENDATION
-    # ========================================================================
-    
-    def _recommend_timing(self, score: float, duration_hours: float = None, event_type: str = '') -> Dict:
-        """Recommend setup, event, and cleanup timings based on event type"""
-        
-        # Default duration if not provided
-        if duration_hours is None:
-            duration_hours = 1
-
-        # Planned events need advance setup; unplanned events have no setup time
-        planned_types = ('vip_movement', 'procession', 'public_event')
-        unplanned_types = ('accident', 'vehicle_breakdown', 'pot_hole', 'tree_fall',
-                           'water_logging', 'congestion')
-        infrastructure_types = ('construction',)
-
-        if event_type in planned_types:
-            if score >= 9:
-                setup = 2.0
-                cleanup = 1.0
-            elif score >= 7:
-                setup = 1.5
-                cleanup = 0.5
-            else:
-                setup = 1.0
-                cleanup = 0.5
-        elif event_type in infrastructure_types:
-            # Construction: no police setup needed; just duration matters
-            setup = 0.0
-            cleanup = 0.5
-        else:
-            # Unplanned: no advance setup possible, cleanup after clearance
-            setup = 0.0
-            if score >= 8:
-                cleanup = 1.0
-            elif score >= 5:
-                cleanup = 0.5
-            else:
-                cleanup = 0.25
+        contextual_score = round(max(0, min(10, contextual_score)), 1)
+        expected_queue_km = round(max(0.3, spread_km * (0.55 + traffic_flow + capacity_pressure + (0.35 if road_closure else 0))), 1)
 
         return {
-            'setup_hours_before': setup,
-            'event_hours': duration_hours,
-            'cleanup_hours_after': cleanup,
-            'total_impact_hours': round(duration_hours + setup + cleanup, 2),
-            'description': (
-                f"{'Pre-deployment: ' + str(setup) + 'h before | ' if setup > 0 else 'No advance setup (unplanned event) | '}"
-                f"Duration: {duration_hours}h | "
-                f"Clearance: {cleanup}h after"
+            "event_numeric_value": event_profile["event_value"],
+            "traffic_flow_index": round(traffic_flow, 2),
+            "road_capacity_index": round(capacity, 2),
+            "capacity_pressure": round(capacity_pressure, 2),
+            "time_factor": round(time_factor * night_gathering_factor, 2),
+            "time_period": time_label,
+            "crowd_size": int(crowd_size),
+            "crowd_pressure": round(crowd_pressure, 2),
+            "road_closure": bool(road_closure),
+            "affected_length_km": round(spread_km, 1),
+            "expected_queue_km": expected_queue_km,
+            "contextual_impact_score": contextual_score,
+            "road_notes": road_profile["notes"],
+            "event_notes": event_profile["notes"],
+        }
+
+    def _recommend_manpower(self, score: float, event_profile: Dict, road_profile: Dict, context: Dict) -> Dict:
+        incident_units = 2 + (score * 1.25)
+        crowd_units = min(26, context["crowd_size"] / 350)
+        traffic_units = 4 + (context["traffic_flow_index"] * 12) + (context["capacity_pressure"] * 10)
+        closure_units = 8 if context["road_closure"] else 0
+        spread_units = min(12, context["expected_queue_km"] * 1.4)
+        complexity_units = event_profile["police_complexity"] * 5
+        raw = incident_units + crowd_units + traffic_units + closure_units + spread_units + complexity_units
+
+        if context["time_period"] == "Night" and context["crowd_size"] < 300:
+            raw *= 0.78
+        elif context["time_period"] == "Night":
+            raw *= 1.08
+
+        recommended = int(round(max(2, min(90, raw))))
+        min_officers = max(0, int(round(recommended * 0.75)))
+        max_officers = int(round(recommended * 1.30))
+
+        return {
+            "min_officers": min_officers,
+            "max_officers": max_officers,
+            "recommended": recommended,
+            "level": self._deployment_level(recommended),
+            "needs_police": recommended >= 3,
+            "description": (
+                f"{event_profile['notes']} Deployment includes junction control, queue protection, "
+                f"and {context['expected_queue_km']} km downstream monitoring."
+            ),
+        }
+
+    def _recommend_barricades(self, score: float, corridor: str, event_profile: Dict, context: Dict) -> Dict:
+        points = self.barricade_points.get(corridor, self.barricade_points["Non-corridor"])
+        if event_profile["event_value"] <= 3 and not context["road_closure"] and score < 5:
+            count = 0
+        else:
+            count = 1 + int(score >= 5.5) + int(score >= 7.2) + int(context["road_closure"]) + int(context["expected_queue_km"] >= 4)
+            count = min(len(points), count)
+
+        if count == 0:
+            level = "NONE"
+            description = "No fixed barricade line; use cones or caution tape only if needed."
+        elif count == 1:
+            level = "SPOT CONTROL"
+            description = "Control the incident point and keep one lane moving where possible."
+        elif count <= 3:
+            level = "CORRIDOR CONTROL"
+            description = "Hold upstream junctions and meter vehicles into the affected stretch."
+        else:
+            level = "FULL ROUTE CONTROL"
+            description = "Stage barricades across approach roads and diversion entry points."
+
+        return {
+            "count": count,
+            "locations": points[:count],
+            "level": level,
+            "description": description,
+        }
+
+    def _recommend_diversions(self, score: float, corridor: str, event_profile: Dict, context: Dict) -> Dict:
+        routes = self.corridor_diversions.get(corridor, self.corridor_diversions["Non-corridor"])
+        route_count = 0
+        if score >= 4.5 or context["traffic_flow_index"] >= 0.75:
+            route_count = 1
+        if score >= 6.5 or context["road_closure"]:
+            route_count = 2
+        if score >= 8.2 or (context["road_closure"] and context["expected_queue_km"] >= 4):
+            route_count = 3
+
+        selected = routes[:route_count]
+        level = ["NONE", "ADVISORY", "ACTIVE", "NETWORK-WIDE"][route_count]
+        description = "No diversion needed; monitor flow." if route_count == 0 else f"Activate {route_count} diversion route(s) before queues exceed {context['expected_queue_km']} km."
+
+        return {
+            "primary": selected[0] if len(selected) > 0 else None,
+            "secondary": selected[1] if len(selected) > 1 else None,
+            "tertiary": selected[2] if len(selected) > 2 else None,
+            "level": level,
+            "description": description,
+        }
+
+    def _recommend_timing(self, score: float, duration_hours: float, event_profile: Dict, road_profile: Dict, context: Dict, manpower: Dict, barricades: Dict) -> Dict:
+        if event_profile["planned"]:
+            setup_minutes = (
+                road_profile["base_response_minutes"]
+                + (barricades["count"] * 12)
+                + (manpower["recommended"] * 0.9)
+                + (context["expected_queue_km"] * 5)
             )
-        }
-    
-    # ========================================================================
-    # IMPACT CATEGORIZATION
-    # ========================================================================
-    
-    def _categorize_impact(self, score: float) -> str:
-        """Categorize impact level"""
-        
-        if score <= 2:
-            return "🟢 LOW"
-        elif score <= 4:
-            return "🟡 LOW-MODERATE"
-        elif score <= 6:
-            return "🟠 MODERATE"
-        elif score <= 8:
-            return "🔴 HIGH"
         else:
-            return "⛔ CRITICAL"
-    
-    # ========================================================================
-    # BUILD SUMMARY
-    # ========================================================================
-    
-    def _build_summary(self, score: float, manpower: Dict, 
-                       barricades: Dict, corridor: str = None) -> str:
-        """Build human-readable summary"""
-        
-        corridor_str = f"on {corridor}" if corridor else ""
-        
-        summary = f"""
-Impact Score: {score}/10
-Manpower: Deploy {manpower['recommended']} officers ({manpower['min_officers']}-{manpower['max_officers']})
-Barricades: {barricades['count']} locations - {barricades['level']} level
-Setup Required: Yes
-Estimated Congestion: {score * 0.75:.1f} km² affected
-Recommendation Level: {manpower['level']}
-        """.strip()
-        
-        return summary
+            setup_minutes = road_profile["base_response_minutes"] + (barricades["count"] * 8)
 
+        if context["time_period"] == "Peak commute":
+            setup_minutes *= 1.18
+        elif context["time_period"] == "Night" and context["crowd_size"] < 300:
+            setup_minutes *= 0.86
 
-# ============================================================================
-# FORMATTED OUTPUT
-# ============================================================================
+        cleanup_minutes = 12 + (barricades["count"] * 8) + (context["expected_queue_km"] * 7)
+        if context["road_closure"]:
+            cleanup_minutes += 18
+        if context["time_period"] == "Peak commute":
+            cleanup_minutes *= 1.12
+
+        setup_hours = round(setup_minutes / 60, 2)
+        cleanup_hours = round(cleanup_minutes / 60, 2)
+
+        return {
+            "setup_hours_before": setup_hours if event_profile["planned"] else 0.0,
+            "response_minutes": round(setup_minutes, 0),
+            "event_hours": duration_hours,
+            "cleanup_hours_after": cleanup_hours,
+            "total_impact_hours": round(duration_hours + (setup_hours if event_profile["planned"] else 0) + cleanup_hours, 2),
+            "description": (
+                f"Response/setup: {round(setup_minutes)} min | Duration: {duration_hours}h | "
+                f"Clearance: {round(cleanup_minutes)} min"
+            ),
+        }
+
+    def _deployment_level(self, officers: int) -> str:
+        if officers <= 6:
+            return "MINIMAL"
+        if officers <= 15:
+            return "LOCAL"
+        if officers <= 30:
+            return "TACTICAL"
+        if officers <= 55:
+            return "MAJOR"
+        return "CITY SUPPORT"
+
+    def _categorize_impact(self, score: float) -> str:
+        if score <= 2:
+            return "LOW"
+        if score <= 4:
+            return "LOW-MODERATE"
+        if score <= 6:
+            return "MODERATE"
+        if score <= 8:
+            return "HIGH"
+        return "CRITICAL"
+
+    def _build_summary(self, score: float, manpower: Dict, barricades: Dict, timing: Dict, context: Dict, corridor: str, zone: Optional[str]) -> str:
+        zone_text = f" / {zone}" if zone else ""
+        return (
+            f"Contextual impact: {score}/10 on {corridor}{zone_text}\n"
+            f"Event value: {context['event_numeric_value']}/10 | Traffic flow: {context['traffic_flow_index']} | Road capacity: {context['road_capacity_index']}\n"
+            f"Expected queue/spread: {context['expected_queue_km']} km from a {context['affected_length_km']} km affected stretch\n"
+            f"Deploy {manpower['recommended']} officers ({manpower['min_officers']}-{manpower['max_officers']}) at {manpower['level']} level\n"
+            f"Barricades: {barricades['count']} locations ({barricades['level']})\n"
+            f"Timing: {timing['description']}"
+        )
+
 
 def print_recommendation(rec: Dict, event_name: str = "Event"):
-    """Print recommendation in formatted way"""
-    
     print("\n" + "=" * 80)
     print(f"RECOMMENDATION: {event_name}")
     print("=" * 80)
-    
-    print(f"\n📊 Impact Assessment")
-    print(f"   Score: {rec['impact_score']}/10")
-    print(f"   Category: {rec['category']}")
-    
-    print(f"\n👮 Manpower Deployment")
-    print(f"   Level: {rec['manpower']['level']}")
-    print(f"   Recommended: {rec['manpower']['recommended']} officers")
-    print(f"   Range: {rec['manpower']['min_officers']}-{rec['manpower']['max_officers']} officers")
-    print(f"   Details: {rec['manpower']['description']}")
-    
-    print(f"\n🚧 Barricade Setup")
-    print(f"   Level: {rec['barricades']['level']}")
-    print(f"   Count: {rec['barricades']['count']} locations")
-    if rec['barricades']['locations']:
-        for i, loc in enumerate(rec['barricades']['locations'], 1):
-            print(f"   {i}. {loc}")
-    print(f"   Details: {rec['barricades']['description']}")
-    
-    print(f"\n🛣️  Traffic Diversions")
-    div = rec['diversions']
-    print(f"   Level: {div['level']}")
-    if div['primary']:
-        print(f"   Primary: {div['primary']}")
-    if div.get('secondary'):
-        print(f"   Secondary: {div['secondary']}")
-    if div.get('tertiary'):
-        print(f"   Tertiary: {div['tertiary']}")
-    if div.get('quaternary'):
-        print(f"   Quaternary: {div['quaternary']}")
-    print(f"   Details: {div['description']}")
-    
-    print(f"\n⏰ Time Management")
-    setup = rec['setup_cleanup']
-    print(f"   Setup Time: {setup['setup_hours_before']:.1f} hours before")
-    print(f"   Event Duration: {setup['event_hours']:.1f} hours")
-    print(f"   Cleanup Time: {setup['cleanup_hours_after']:.1f} hours after")
-    print(f"   Total Traffic Impact: {setup['total_impact_hours']:.1f} hours")
-    print(f"   Details: {setup['description']}")
-    
-    print(f"\n📝 Summary")
-    print(rec['summary'])
-    print("\n" + "=" * 80)
+    print(f"\nImpact score: {rec['impact_score']}/10 ({rec['category']})")
+    print(f"Context: {rec['summary']}")
+    print(f"\nManpower: {rec['manpower']['recommended']} officers")
+    print(f"Barricades: {rec['barricades']['count']} - {rec['barricades']['level']}")
+    div = rec["diversions"]
+    print(f"Diversion level: {div['level']}")
+    for label in ("primary", "secondary", "tertiary"):
+        if div.get(label):
+            print(f"  {label.title()}: {div[label]}")
+    print("=" * 80)
 
-
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
 
 if __name__ == "__main__":
-    
-    print("\n" + "=" * 80)
-    print("PHASE 4: RECOMMENDATION ENGINE")
-    print("=" * 80)
-    
-    # Initialize engine
     engine = RecommendationEngine()
-    
-    # Example 1: LOW impact event
-    print("\n\n📋 EXAMPLE 1: Vehicle Breakdown (Low Impact)")
-    rec1 = engine.recommend(
-        impact_score=2.5,
-        event_type='accident',
-        corridor='Mysore Road',
-        zone='Hebbal',
-        duration_hours=1
+    sample = engine.recommend(
+        impact_score=5.5,
+        event_type="public_event",
+        corridor="ORR East 2",
+        zone="East Zone 2",
+        duration_hours=3,
+        hour=19,
+        crowd_size=2500,
+        road_closure=True,
     )
-    print_recommendation(rec1, "Vehicle Breakdown on Mysore Road")
-    
-    # Example 2: MODERATE impact event
-    print("\n\n📋 EXAMPLE 2: Construction (Moderate Impact)")
-    rec2 = engine.recommend(
-        impact_score=5.8,
-        event_type='construction',
-        corridor='Bellary Road 1',
-        zone='Yeshwantpur',
-        duration_hours=6
-    )
-    print_recommendation(rec2, "Road Construction on Bellary Road")
-    
-    # Example 3: HIGH impact event
-    print("\n\n📋 EXAMPLE 3: Public Event (High Impact)")
-    rec3 = engine.recommend(
-        impact_score=8.2,
-        event_type='public_event',
-        corridor='CBD-2',
-        zone='Central',
-        duration_hours=4
-    )
-    print_recommendation(rec3, "Concert at M Chinnaswamy Stadium")
-    
-    # Example 4: CRITICAL impact event
-    print("\n\n📋 EXAMPLE 4: VIP Movement (Critical Impact)")
-    rec4 = engine.recommend(
-        impact_score=9.5,
-        event_type='vip_movement',
-        corridor='ORR North',
-        zone='Hebbal',
-        duration_hours=2
-    )
-    print_recommendation(rec4, "VIP Movement - High Priority")
-    
-    print("\n\n✅ Recommendation Engine Ready for Phase 5 (Dashboard)")
+    print_recommendation(sample, "Public event on ORR East 2")

@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import sys
+from datetime import datetime
 sys.path.insert(0, '.')
 from recommendation_engine import RecommendationEngine
 
@@ -24,17 +25,58 @@ st.set_page_config(
 # Custom CSS
 st.markdown("""
 <style>
-    .main {
-        padding-top: 2rem;
+    :root {
+        --surface: #ffffff;
+        --page: #f7f9fc;
+        --line: #d9e2ec;
+        --text: #102033;
+        --muted: #5d6b7a;
+        --accent: #0f6b99;
+        --accent-soft: #e8f4fa;
+        --warn-soft: #fff4df;
+        --danger-soft: #ffecec;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
+    .stApp { background: var(--page); color: var(--text); }
+    .block-container { padding-top: 2.4rem; padding-bottom: 3rem; max-width: 1280px; }
+    h1, h2, h3 { color: var(--text); letter-spacing: 0; }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; border-bottom: 1px solid var(--line); }
+    .stTabs [data-baseweb="tab"] {
+        background: transparent;
+        border-radius: 6px 6px 0 0;
+        padding: 12px 16px;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    div[data-testid="stMetric"] {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 18px 14px;
+        min-height: 118px;
+        box-shadow: 0 1px 2px rgba(16, 32, 51, 0.04);
+    }
+    .ops-card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
         padding: 20px;
-        border-radius: 10px;
-        color: white;
+        min-height: 146px;
+        box-shadow: 0 1px 2px rgba(16, 32, 51, 0.04);
+    }
+    .ops-card .label { color: var(--muted); font-size: 0.92rem; margin: 0 0 8px; }
+    .ops-card .value { color: var(--text); font-size: 2.1rem; font-weight: 720; line-height: 1.05; margin: 0; }
+    .ops-card .detail { color: var(--muted); font-size: 0.9rem; margin: 10px 0 0; }
+    .context-row {
+        background: var(--accent-soft);
+        border: 1px solid #c7e4f1;
+        border-radius: 8px;
+        padding: 14px 16px;
+        color: var(--text);
+        margin-bottom: 10px;
+    }
+    .small-note { color: var(--muted); font-size: 0.92rem; }
+    div.stButton > button {
+        border-radius: 6px;
+        min-height: 46px;
+        font-weight: 650;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -78,13 +120,13 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ============================================================================
 
 with tab1:
-    st.markdown("## 🎯 Predict Impact & Get Recommendations")
-    st.markdown("Enter event details to get real-time predictions and deployment recommendations")
+    st.markdown("## Live Congestion Assessment")
+    st.markdown("Enter the operating conditions to calculate a numeric impact score and deployment plan.")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("### 📍 Event Details")
+        st.markdown("### Event Details")
         
         event_cause = st.selectbox(
             "Event Type",
@@ -110,15 +152,35 @@ with tab1:
             help="Administrative zone"
         )
         
-        priority = st.radio(
-            "Priority Level",
-            options=['Low', 'Medium', 'High'],
-            horizontal=True,
-            help="Event priority classification"
+        event_severity = st.slider(
+            "Event Severity Value",
+            min_value=0.0,
+            max_value=10.0,
+            value=5.0,
+            step=0.1,
+            help="Numeric seriousness of the event instead of Low/Medium/High"
+        )
+
+        crowd_size = st.number_input(
+            "Estimated Crowd / People Affected",
+            min_value=0,
+            max_value=100000,
+            value=500,
+            step=100,
+            help="People gathered, expected spectators, or commuters directly affected"
         )
     
     with col2:
-        st.markdown("### ⏰ Time & Duration")
+        st.markdown("### Time, Road & Flow")
+
+        event_hour = st.slider(
+            "Event Hour",
+            min_value=0,
+            max_value=23,
+            value=datetime.now().hour,
+            step=1,
+            help="Hour of day in 24-hour format"
+        )
         
         duration_hours = st.slider(
             "Event Duration (hours)",
@@ -134,9 +196,34 @@ with tab1:
             value=False,
             help="Will the road need to be completely closed?"
         )
+
+        affected_length_km = st.slider(
+            "Affected Road Length / Spread (km)",
+            min_value=0.2,
+            max_value=10.0,
+            value=1.5,
+            step=0.1,
+            help="How far the blockage, crowd, queue, or work zone is expected to spread"
+        )
+
+        use_live_flow = st.checkbox(
+            "Override corridor traffic profile",
+            value=False,
+            help="Use this when you have live traffic information for the selected road"
+        )
+
+        traffic_flow_index = st.slider(
+            "Current Traffic Flow Index",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.75,
+            step=0.01,
+            disabled=not use_live_flow,
+            help="0.00 = free flow, 1.00 = saturated"
+        )
         
-        st.markdown("### 🎓 Model Confidence")
-        st.info("Model Accuracy: 95.5% | Prediction Error: ±0.08/10")
+        st.markdown("### Model Context")
+        st.info("Uses numeric event value, road capacity, local flow, queue spread, crowd size, closure status, and time of day.")
     
     # ====================================================================
     # PREDICTION SECTION
@@ -146,52 +233,35 @@ with tab1:
     
     if st.button("🚀 Get Prediction & Recommendations", type="primary", use_container_width=True):
         
-        # Calculate impact score (simplified version)
-        impact_score = 5.0
-        
-        if any(x in event_cause for x in ['public', 'procession']):
-            impact_score += 3.5
-        elif 'accident' in event_cause:
-            impact_score += 2.5
-        elif 'construction' in event_cause or 'vip' in event_cause:
-            impact_score += 2.0
-        elif 'breakdown' in event_cause:
-            impact_score += 1.5
-        else:
-            impact_score += 0.5
-        
-        if priority == 'High':
-            impact_score += 1.5
-        elif priority == 'Medium':
-            impact_score += 0.5
-        else:
-            impact_score -= 0.5
-        
-        if road_closure:
-            impact_score += 2.0
-        
-        impact_score += min(duration_hours / 15, 1.0)
-        impact_score = max(1, min(10, impact_score))
+        base_impact_score = event_severity
         
         # Get recommendations
         recommendations = st.session_state.engine.recommend(
-            impact_score=impact_score,
+            impact_score=base_impact_score,
             event_type=event_cause,
             corridor=corridor,
             zone=zone,
-            duration_hours=duration_hours
+            duration_hours=duration_hours,
+            hour=event_hour,
+            crowd_size=crowd_size,
+            road_closure=road_closure,
+            affected_length_km=affected_length_km,
+            live_traffic_index=traffic_flow_index if use_live_flow else None
         )
+
+        impact_score = recommendations['impact_score']
+        context = recommendations['context']
         
         # Display results
         st.markdown("---")
-        st.markdown("## 📊 Prediction Results")
+        st.markdown("## Prediction Results")
         
         # Impact score with visual gauge
         col1, col2, col3 = st.columns(3)
         
         with col1:
             st.metric(
-                "Impact Score",
+                "Contextual Impact Score",
                 f"{impact_score:.1f}/10",
                 delta=None,
                 delta_color="inverse"
@@ -206,58 +276,65 @@ with tab1:
         
         with col3:
             st.metric(
-                "Confidence",
-                "95.5%",
-                delta=None
+                "Expected Queue",
+                f"{context['expected_queue_km']:.1f} km",
+                delta=f"{context['time_period']}"
             )
         
         st.divider()
+
+        st.markdown("### Context Factors")
+        ctx1, ctx2, ctx3, ctx4 = st.columns(4)
+        with ctx1:
+            st.markdown(f"<div class='context-row'><b>Event Value</b><br>{context['event_numeric_value']}/10</div>", unsafe_allow_html=True)
+        with ctx2:
+            st.markdown(f"<div class='context-row'><b>Traffic Flow</b><br>{context['traffic_flow_index']} / 1.00</div>", unsafe_allow_html=True)
+        with ctx3:
+            st.markdown(f"<div class='context-row'><b>Road Capacity</b><br>{context['road_capacity_index']} / 1.00</div>", unsafe_allow_html=True)
+        with ctx4:
+            st.markdown(f"<div class='context-row'><b>Time Factor</b><br>{context['time_factor']}x</div>", unsafe_allow_html=True)
         
         # Recommendations
-        st.markdown("## 👮 Police Deployment Recommendations")
+        st.markdown("## Police Deployment Recommendations")
         
         rec_col1, rec_col2, rec_col3, rec_col4 = st.columns(4)
         
         with rec_col1:
             manpower = recommendations['manpower']
             st.markdown(f"""
-            <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                        padding: 20px; border-radius: 10px; color: white; text-align: center;'>
-                <h3 style='margin: 0; font-size: 2.5em;'>{manpower['recommended']}</h3>
-                <p style='margin: 5px 0 0 0;'>Officers</p>
-                <p style='margin: 5px 0 0 0; font-size: 0.9em;'>{manpower['min_officers']}-{manpower['max_officers']}</p>
+            <div class='ops-card'>
+                <p class='label'>Officers</p>
+                <p class='value'>{manpower['recommended']}</p>
+                <p class='detail'>Range {manpower['min_officers']}-{manpower['max_officers']} · {manpower['level']}</p>
             </div>
             """, unsafe_allow_html=True)
         
         with rec_col2:
             barricades = recommendations['barricades']
             st.markdown(f"""
-            <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
-                        padding: 20px; border-radius: 10px; color: white; text-align: center;'>
-                <h3 style='margin: 0; font-size: 2.5em;'>{barricades['count']}</h3>
-                <p style='margin: 5px 0 0 0;'>Barricade Locations</p>
-                <p style='margin: 5px 0 0 0; font-size: 0.9em;'>{barricades['level']}</p>
+            <div class='ops-card'>
+                <p class='label'>Barricade Locations</p>
+                <p class='value'>{barricades['count']}</p>
+                <p class='detail'>{barricades['level']}</p>
             </div>
             """, unsafe_allow_html=True)
         
         with rec_col3:
             setup = recommendations['setup_cleanup']
             st.markdown(f"""
-            <div style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
-                        padding: 20px; border-radius: 10px; color: white; text-align: center;'>
-                <h3 style='margin: 0; font-size: 2.5em;'>{setup['setup_hours_before']:.1f}h</h3>
-                <p style='margin: 5px 0 0 0;'>Setup Time</p>
-                <p style='margin: 5px 0 0 0; font-size: 0.9em;'>Before Event</p>
+            <div class='ops-card'>
+                <p class='label'>Setup / Response</p>
+                <p class='value'>{setup['response_minutes']:.0f}m</p>
+                <p class='detail'>{setup['setup_hours_before']:.2f}h pre-deployment for planned events</p>
             </div>
             """, unsafe_allow_html=True)
         
         with rec_col4:
             st.markdown(f"""
-            <div style='background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); 
-                        padding: 20px; border-radius: 10px; color: white; text-align: center;'>
-                <h3 style='margin: 0; font-size: 2.5em;'>{setup['cleanup_hours_after']:.1f}h</h3>
-                <p style='margin: 5px 0 0 0;'>Cleanup Time</p>
-                <p style='margin: 5px 0 0 0; font-size: 0.9em;'>After Event</p>
+            <div class='ops-card'>
+                <p class='label'>Clearance Time</p>
+                <p class='value'>{setup['cleanup_hours_after']:.2f}h</p>
+                <p class='detail'>Total impact {setup['total_impact_hours']:.2f}h</p>
             </div>
             """, unsafe_allow_html=True)
         
