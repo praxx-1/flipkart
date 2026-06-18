@@ -77,17 +77,20 @@ class RecommendationEngine:
         # Clamp to 0-10 range
         impact_score = max(0, min(10, impact_score))
         
+        # Normalise event_type string
+        event_type_clean = str(event_type).lower().strip() if event_type else ''
+
         # Get manpower recommendation
-        manpower = self._recommend_manpower(impact_score)
+        manpower = self._recommend_manpower(impact_score, event_type_clean)
         
         # Get barricade locations
-        barricades = self._recommend_barricades(impact_score, corridor)
+        barricades = self._recommend_barricades(impact_score, corridor, event_type_clean)
         
         # Get diversion routes
-        diversions = self._recommend_diversions(impact_score, corridor)
+        diversions = self._recommend_diversions(impact_score, corridor, event_type_clean)
         
         # Get setup/cleanup times
-        setup_cleanup = self._recommend_timing(impact_score, duration_hours)
+        setup_cleanup = self._recommend_timing(impact_score, duration_hours, event_type_clean)
         
         # Get impact category
         category = self._categorize_impact(impact_score)
@@ -106,208 +109,376 @@ class RecommendationEngine:
         return recommendation
     
     # ========================================================================
+    # EVENT TYPE PROFILES
+    # Each event type has a base manpower range, barricade need, and
+    # diversion need that OVERRIDES the generic score-only logic.
+    # Priority (High/Medium/Low) is used as a MULTIPLIER within the profile.
+    # ========================================================================
+
+    def _get_event_profile(self, event_type: str) -> Dict:
+        """
+        Return a realistic deployment profile per event type.
+        Fields:
+          - needs_police: Whether police traffic deployment is relevant
+          - base_officers: Realistic recommended officers (not inflated)
+          - officer_range: (min, max) realistic range
+          - barricade_need: 'none' | 'low' | 'medium' | 'high'
+          - diversion_need: 'none' | 'low' | 'medium' | 'high'
+          - notes: human-readable context
+        """
+        profiles = {
+            # ── Planned Events ──────────────────────────────────────────────
+            'vip_movement': {
+                'needs_police': True,
+                'base_officers': 20,
+                'officer_range': (15, 30),
+                'barricade_need': 'high',
+                'diversion_need': 'high',
+                'notes': 'VIP security escort + route clearance required'
+            },
+            'procession': {
+                'needs_police': True,
+                'base_officers': 18,
+                'officer_range': (12, 25),
+                'barricade_need': 'high',
+                'diversion_need': 'high',
+                'notes': 'Crowd control + route management needed'
+            },
+            'public_event': {
+                'needs_police': True,
+                'base_officers': 12,
+                'officer_range': (8, 20),
+                'barricade_need': 'medium',
+                'diversion_need': 'medium',
+                'notes': 'Crowd & parking management, perimeter control'
+            },
+            # ── Unplanned / Infrastructure ───────────────────────────────
+            'accident': {
+                'needs_police': True,
+                'base_officers': 6,
+                'officer_range': (4, 10),
+                'barricade_need': 'medium',
+                'diversion_need': 'medium',
+                'notes': 'Scene management + traffic flow around incident'
+            },
+            'construction': {
+                'needs_police': False,
+                'base_officers': 3,
+                'officer_range': (2, 6),
+                'barricade_need': 'medium',
+                'diversion_need': 'medium',
+                'notes': 'Construction crew handles safety; 1-2 officers for flow'
+            },
+            'vehicle_breakdown': {
+                'needs_police': False,
+                'base_officers': 2,
+                'officer_range': (1, 4),
+                'barricade_need': 'low',
+                'diversion_need': 'low',
+                'notes': 'Tow truck + minor traffic management; minimal police'
+            },
+            'pot_hole': {
+                'needs_police': False,
+                'base_officers': 1,
+                'officer_range': (0, 2),
+                'barricade_need': 'low',
+                'diversion_need': 'none',
+                'notes': 'BBMP/maintenance team; police rarely needed'
+            },
+            'water_logging': {
+                'needs_police': True,
+                'base_officers': 4,
+                'officer_range': (3, 8),
+                'barricade_need': 'medium',
+                'diversion_need': 'medium',
+                'notes': 'Route diversion + safety control required'
+            },
+            'tree_fall': {
+                'needs_police': False,
+                'base_officers': 2,
+                'officer_range': (1, 4),
+                'barricade_need': 'low',
+                'diversion_need': 'low',
+                'notes': 'BBMP clears; minimal traffic control needed'
+            },
+            'congestion': {
+                'needs_police': True,
+                'base_officers': 5,
+                'officer_range': (3, 8),
+                'barricade_need': 'low',
+                'diversion_need': 'medium',
+                'notes': 'Signal management + diversion advisory'
+            },
+        }
+        # Fallback for unknown types
+        return profiles.get(event_type, {
+            'needs_police': True,
+            'base_officers': 5,
+            'officer_range': (3, 10),
+            'barricade_need': 'low',
+            'diversion_need': 'low',
+            'notes': 'Standard traffic management'
+        })
+
+    def _priority_multiplier(self, impact_score: float) -> float:
+        """
+        Convert impact score into a priority multiplier (0.8 – 1.5).
+        VIP at score 6 still gets more resources than pot_hole at score 9
+        because the event profile caps the base differently.
+        """
+        if impact_score >= 9:
+            return 1.5
+        elif impact_score >= 7:
+            return 1.2
+        elif impact_score >= 5:
+            return 1.0
+        else:
+            return 0.8
+
+    # ========================================================================
     # MANPOWER RECOMMENDATION
     # ========================================================================
-    
-    def _recommend_manpower(self, score: float) -> Dict:
-        """Recommend police officer deployment based on impact score"""
-        
-        if score <= 2:
-            return {
-                'min_officers': 5,
-                'max_officers': 10,
-                'recommended': 8,
-                'level': 'MINIMAL',
-                'description': 'Basic traffic management only'
-            }
-        elif score <= 4:
-            return {
-                'min_officers': 10,
-                'max_officers': 20,
-                'recommended': 15,
-                'level': 'LOW',
-                'description': 'Standard traffic control, 1-2 alternate routes'
-            }
-        elif score <= 6:
-            return {
-                'min_officers': 20,
-                'max_officers': 35,
-                'recommended': 28,
-                'level': 'MODERATE',
-                'description': 'Moderate traffic management, multiple diversions'
-            }
-        elif score <= 8:
-            return {
-                'min_officers': 35,
-                'max_officers': 50,
-                'recommended': 42,
-                'level': 'HIGH',
-                'description': 'Heavy traffic control, full barricading'
-            }
-        else:  # > 8
-            return {
-                'min_officers': 50,
-                'max_officers': 70,
-                'recommended': 60,
-                'level': 'CRITICAL',
-                'description': 'Maximum deployment, all available routes controlled'
-            }
-    
+
+    def _recommend_manpower(self, score: float, event_type: str = '') -> Dict:
+        """Recommend police officer deployment based on event type + impact score"""
+
+        profile = self._get_event_profile(event_type)
+        multiplier = self._priority_multiplier(score)
+
+        base = profile['base_officers']
+        lo, hi = profile['officer_range']
+
+        recommended = max(lo, min(hi, round(base * multiplier)))
+
+        if not profile['needs_police']:
+            level = 'MONITORING'
+            description = f"Police monitoring optional. {profile['notes']}"
+        elif recommended <= 3:
+            level = 'MINIMAL'
+            description = profile['notes']
+        elif recommended <= 8:
+            level = 'LOW'
+            description = profile['notes']
+        elif recommended <= 15:
+            level = 'MODERATE'
+            description = profile['notes']
+        elif recommended <= 22:
+            level = 'HIGH'
+            description = profile['notes']
+        else:
+            level = 'CRITICAL'
+            description = profile['notes']
+
+        return {
+            'min_officers': lo,
+            'max_officers': hi,
+            'recommended': recommended,
+            'level': level,
+            'needs_police': profile['needs_police'],
+            'description': description
+        }
+
     # ========================================================================
     # BARRICADE RECOMMENDATION
     # ========================================================================
     
-    def _recommend_barricades(self, score: float, corridor: str = None) -> Dict:
-        """Recommend barricade locations and extent"""
-        
-        locations = []
+    def _recommend_barricades(self, score: float, corridor: str = None, event_type: str = '') -> Dict:
+        """Recommend barricade locations and extent based on event type + score"""
         
         # Get corridor-specific barricades
         if corridor and corridor in self.barricade_points:
             corridor_barricades = self.barricade_points[corridor]
         else:
             corridor_barricades = ['Main junction', 'Secondary junction']
-        
-        if score <= 2:
+
+        profile = self._get_event_profile(event_type)
+        need = profile['barricade_need']  # 'none' | 'low' | 'medium' | 'high'
+
+        # Events that almost never need barricades
+        if need == 'none' or event_type in ('pot_hole', 'tree_fall'):
             return {
                 'count': 0,
                 'locations': [],
                 'level': 'NONE',
-                'description': 'No barricades needed'
+                'description': 'No barricades needed — maintenance crew handles the site'
             }
-        elif score <= 4:
+
+        # Low-need events: at most 1 cone/barrier at the spot
+        if need == 'low':
             return {
                 'count': 1,
                 'locations': corridor_barricades[:1],
                 'level': 'MINIMAL',
-                'description': 'Main junction only'
+                'description': 'Single barrier/cone at incident spot'
             }
-        elif score <= 6:
-            return {
-                'count': 2,
-                'locations': corridor_barricades[:2],
-                'level': 'MODERATE',
-                'description': 'Main junction + secondary junctions'
-            }
-        elif score <= 8:
-            return {
-                'count': 3,
-                'locations': corridor_barricades[:3],
-                'level': 'HEAVY',
-                'description': 'All major junctions in corridor'
-            }
-        else:  # > 8
+
+        # Medium-need events (accidents, construction, water-logging)
+        if need == 'medium':
+            if score >= 8:
+                return {
+                    'count': 2,
+                    'locations': corridor_barricades[:2],
+                    'level': 'MODERATE',
+                    'description': 'Barricade incident zone + upstream junction'
+                }
+            else:
+                return {
+                    'count': 1,
+                    'locations': corridor_barricades[:1],
+                    'level': 'MINIMAL',
+                    'description': 'Single barrier at incident point'
+                }
+
+        # High-need events (VIP, procession, public_event)
+        if score >= 9:
             return {
                 'count': len(corridor_barricades),
                 'locations': corridor_barricades,
                 'level': 'FULL',
-                'description': 'Complete corridor closure, all junctions controlled'
+                'description': 'Full route barricading, all junctions controlled'
+            }
+        elif score >= 7:
+            return {
+                'count': min(3, len(corridor_barricades)),
+                'locations': corridor_barricades[:3],
+                'level': 'HEAVY',
+                'description': 'Major junctions barricaded along route'
+            }
+        else:
+            return {
+                'count': 2,
+                'locations': corridor_barricades[:2],
+                'level': 'MODERATE',
+                'description': 'Entry & exit points barricaded'
             }
     
     # ========================================================================
     # DIVERSION ROUTE RECOMMENDATION
     # ========================================================================
     
-    def _recommend_diversions(self, score: float, corridor: str = None) -> Dict:
-        """Recommend alternate routes for traffic diversion"""
+    def _recommend_diversions(self, score: float, corridor: str = None, event_type: str = '') -> Dict:
+        """Recommend alternate routes for traffic diversion based on event type + score"""
         
         # Get corridor-specific diversions
         if corridor and corridor in self.corridor_diversions:
             available_routes = self.corridor_diversions[corridor]
         else:
             available_routes = ['ORR', 'HSR Layout', 'Whitefield Road']
-        
-        if score <= 2:
+
+        profile = self._get_event_profile(event_type)
+        need = profile['diversion_need']  # 'none' | 'low' | 'medium' | 'high'
+
+        # Events that don't affect through traffic at all
+        if need == 'none':
             return {
                 'primary': None,
                 'secondary': None,
                 'level': 'NONE',
-                'description': 'Normal traffic flow, no diversions needed'
+                'description': 'No diversion needed — spot repair, traffic flows normally'
             }
-        elif score <= 4:
+
+        # Minor incidents: advisory only
+        if need == 'low':
             return {
-                'primary': available_routes[0] if len(available_routes) > 0 else 'ORR',
+                'primary': available_routes[0] if available_routes else 'Parallel Road',
                 'secondary': None,
-                'level': 'MINIMAL',
-                'description': f'Minor diversion to {available_routes[0] if len(available_routes) > 0 else "alternate route"}'
+                'level': 'ADVISORY',
+                'description': f'Optional advisory diversion via {available_routes[0] if available_routes else "alternate route"}'
             }
-        elif score <= 6:
+
+        # Medium need (accidents, construction, water-logging, congestion)
+        if need == 'medium':
+            if score >= 8:
+                return {
+                    'primary': available_routes[0] if available_routes else 'ORR',
+                    'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
+                    'level': 'MODERATE',
+                    'description': f'Divert via {available_routes[0] if available_routes else "ORR"} and {available_routes[1] if len(available_routes) > 1 else "HSR Layout"}'
+                }
+            else:
+                return {
+                    'primary': available_routes[0] if available_routes else 'ORR',
+                    'secondary': None,
+                    'level': 'MINIMAL',
+                    'description': f'Minor diversion via {available_routes[0] if available_routes else "alternate route"}'
+                }
+
+        # High need (VIP, procession, major public event)
+        if score >= 9:
             return {
-                'primary': available_routes[0] if len(available_routes) > 0 else 'ORR',
-                'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
-                'level': 'MODERATE',
-                'description': f'Divert via {available_routes[0] if len(available_routes) > 0 else "primary"} and {available_routes[1] if len(available_routes) > 1 else "secondary"}'
-            }
-        elif score <= 8:
-            routes_to_use = available_routes[:2] if len(available_routes) >= 2 else available_routes
-            return {
-                'primary': routes_to_use[0],
-                'secondary': routes_to_use[1] if len(routes_to_use) > 1 else 'ORR',
-                'tertiary': available_routes[2] if len(available_routes) > 2 else 'Parallel Road',
-                'level': 'HEAVY',
-                'description': f'Heavy diversions: Primary via {routes_to_use[0]}, Secondary via {routes_to_use[1] if len(routes_to_use) > 1 else "ORR"}'
-            }
-        else:  # > 8
-            return {
-                'primary': available_routes[0] if len(available_routes) > 0 else 'ORR North',
+                'primary': available_routes[0] if available_routes else 'ORR North',
                 'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
                 'tertiary': available_routes[2] if len(available_routes) > 2 else 'Whitefield Road',
-                'quaternary': 'Bangalore-Mysore Road' if len(available_routes) < 4 else available_routes[3],
                 'level': 'CRITICAL',
-                'description': 'All available routes activated, maximum traffic diversion'
+                'description': 'Full route clearance — all alternate corridors activated'
+            }
+        elif score >= 7:
+            return {
+                'primary': available_routes[0] if available_routes else 'ORR',
+                'secondary': available_routes[1] if len(available_routes) > 1 else 'HSR Layout',
+                'level': 'HEAVY',
+                'description': f'Heavy diversion via {available_routes[0] if available_routes else "ORR"} and {available_routes[1] if len(available_routes) > 1 else "HSR Layout"}'
+            }
+        else:
+            return {
+                'primary': available_routes[0] if available_routes else 'ORR',
+                'secondary': None,
+                'level': 'MODERATE',
+                'description': f'Divert traffic via {available_routes[0] if available_routes else "alternate route"}'
             }
     
     # ========================================================================
     # TIMING RECOMMENDATION
     # ========================================================================
     
-    def _recommend_timing(self, score: float, duration_hours: float = None) -> Dict:
-        """Recommend setup, event, and cleanup timings"""
+    def _recommend_timing(self, score: float, duration_hours: float = None, event_type: str = '') -> Dict:
+        """Recommend setup, event, and cleanup timings based on event type"""
         
         # Default duration if not provided
         if duration_hours is None:
-            duration_hours = 4
-        
-        if score <= 2:
-            return {
-                'setup_hours_before': 0.5,
-                'event_hours': duration_hours,
-                'cleanup_hours_after': 0.5,
-                'total_impact_hours': duration_hours + 1,
-                'description': 'Minimal setup/cleanup'
-            }
-        elif score <= 4:
-            return {
-                'setup_hours_before': 1,
-                'event_hours': duration_hours,
-                'cleanup_hours_after': 0.5,
-                'total_impact_hours': duration_hours + 1.5,
-                'description': 'Standard setup and cleanup'
-            }
-        elif score <= 6:
-            return {
-                'setup_hours_before': 1.5,
-                'event_hours': duration_hours,
-                'cleanup_hours_after': 1,
-                'total_impact_hours': duration_hours + 2.5,
-                'description': 'Extended setup, moderate cleanup'
-            }
-        elif score <= 8:
-            return {
-                'setup_hours_before': 2,
-                'event_hours': duration_hours,
-                'cleanup_hours_after': 1.5,
-                'total_impact_hours': duration_hours + 3.5,
-                'description': 'Full setup period, comprehensive cleanup'
-            }
-        else:  # > 8
-            return {
-                'setup_hours_before': 3,
-                'event_hours': duration_hours,
-                'cleanup_hours_after': 2,
-                'total_impact_hours': duration_hours + 5,
-                'description': 'Maximum setup time, full traffic restoration protocol'
-            }
+            duration_hours = 1
+
+        # Planned events need advance setup; unplanned events have no setup time
+        planned_types = ('vip_movement', 'procession', 'public_event')
+        unplanned_types = ('accident', 'vehicle_breakdown', 'pot_hole', 'tree_fall',
+                           'water_logging', 'congestion')
+        infrastructure_types = ('construction',)
+
+        if event_type in planned_types:
+            if score >= 9:
+                setup = 2.0
+                cleanup = 1.0
+            elif score >= 7:
+                setup = 1.5
+                cleanup = 0.5
+            else:
+                setup = 1.0
+                cleanup = 0.5
+        elif event_type in infrastructure_types:
+            # Construction: no police setup needed; just duration matters
+            setup = 0.0
+            cleanup = 0.5
+        else:
+            # Unplanned: no advance setup possible, cleanup after clearance
+            setup = 0.0
+            if score >= 8:
+                cleanup = 1.0
+            elif score >= 5:
+                cleanup = 0.5
+            else:
+                cleanup = 0.25
+
+        return {
+            'setup_hours_before': setup,
+            'event_hours': duration_hours,
+            'cleanup_hours_after': cleanup,
+            'total_impact_hours': round(duration_hours + setup + cleanup, 2),
+            'description': (
+                f"{'Pre-deployment: ' + str(setup) + 'h before | ' if setup > 0 else 'No advance setup (unplanned event) | '}"
+                f"Duration: {duration_hours}h | "
+                f"Clearance: {cleanup}h after"
+            )
+        }
     
     # ========================================================================
     # IMPACT CATEGORIZATION
