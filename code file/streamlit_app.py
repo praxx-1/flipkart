@@ -16,12 +16,12 @@ sys.path.insert(0, str(APP_DIR))
 from recommendation_engine import RecommendationEngine
 
 
-def _style_dark_chart(fig, ax, *, legend: bool = False) -> None:
-    """Apply dark-theme styling to matplotlib figures."""
-    panel = "#151c27"
-    text = "#eef2f7"
-    grid = "#2a3647"
-    fig.patch.set_facecolor("#0b0f14")
+def _style_light_chart(fig, ax, *, legend: bool = False) -> None:
+    """Apply light-theme styling to matplotlib figures."""
+    panel = "#ffffff"
+    text = "#212529"
+    grid = "#e9ecef"
+    fig.patch.set_facecolor("#f8f9fa")
     ax.set_facecolor(panel)
     ax.tick_params(colors=text, labelcolor=text)
     ax.xaxis.label.set_color(text)
@@ -52,14 +52,15 @@ st.set_page_config(
 st.markdown("""
 <style>
     :root {
-        --page: #0b0f14;
-        --surface: #151c27;
-        --surface-hover: #1c2636;
-        --line: #2a3647;
-        --text: #eef2f7;
-        --muted: #9aaabe;
-        --accent: #4dabf7;
-        --accent-soft: #1a2d42;
+        --page: #f8f9fa;
+        --surface: #ffffff;
+        --surface-hover: #f1f3f5;
+        --line: #dee2e6;
+        --text: #212529;
+        --muted: #868e96;
+        --accent: #228be6;
+        --accent-soft: #e7f5ff;
+        --accent-border: #74c0fc;
     }
 
     /* App shell */
@@ -73,9 +74,10 @@ st.markdown("""
         color: var(--text) !important;
     }
     .block-container {
-        padding-top: 2.4rem;
-        padding-bottom: 3rem;
-        max-width: 1280px;
+        padding-top: 3.5rem;
+        padding-bottom: 4rem;
+        max-width: 1400px;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
     }
 
     /* Headings & body copy */
@@ -173,10 +175,10 @@ st.markdown("""
     div[data-testid="stMetric"] {
         background: var(--surface) !important;
         border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 18px 18px 14px;
-        min-height: 118px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        border-radius: 12px;
+        padding: 24px 24px 20px;
+        min-height: 128px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
     [data-testid="stMetricLabel"] p,
     [data-testid="stMetricLabel"] {
@@ -197,21 +199,23 @@ st.markdown("""
     .ops-card {
         background: var(--surface);
         border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 20px;
-        min-height: 146px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        border-radius: 12px;
+        padding: 28px;
+        min-height: 160px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
     }
     .ops-card .label { color: var(--muted); font-size: 0.92rem; margin: 0 0 8px; font-weight: 600; }
     .ops-card .value { color: var(--text); font-size: 2.1rem; font-weight: 720; line-height: 1.05; margin: 0; }
     .ops-card .detail { color: var(--muted); font-size: 0.9rem; margin: 10px 0 0; }
     .context-row {
         background: var(--accent-soft);
-        border: 1px solid #2d5575;
-        border-radius: 8px;
-        padding: 14px 16px;
+        border: 1px solid var(--accent-border);
+        border-radius: 10px;
+        padding: 18px 24px;
         color: var(--text) !important;
-        margin-bottom: 10px;
+        margin-bottom: 16px;
+        font-size: 1.05rem;
+        box-shadow: 0 2px 6px rgba(34, 139, 230, 0.1);
     }
     .context-row b { color: var(--text) !important; }
 
@@ -397,21 +401,37 @@ with tab1:
     with col2:
         st.markdown("### Time")
 
-        event_hour = st.slider(
-            "Event Hour",
-            min_value=0,
-            max_value=23,
-            value=datetime.now().hour,
-            step=1,
-            help="Hour of day in 24-hour format"
+        if "event_time" not in st.session_state:
+            st.session_state.event_time = datetime.now().time()
+            
+        event_time = st.time_input(
+            "Event Time",
+            value=st.session_state.event_time,
+            help="Select the exact time of the event"
         )
+        st.session_state.event_time = event_time
+        event_hour = event_time.hour
 
-        baseline = st.session_state.engine.estimate_defaults(event_cause, corridor, event_hour)
+        baseline = st.session_state.engine.estimate_defaults(event_cause, corridor, event_hour, zone=zone)
+        
+        if baseline.get("expected_crowd_range"):
+            st.markdown("### 👥 Crowd Estimation")
+            crowd_range = baseline["expected_crowd_range"]
+            expected_crowd = st.number_input(
+                "Expected Crowd Size",
+                min_value=100,
+                max_value=500000,
+                value=int(crowd_range[1]),
+                step=500,
+                help=f"Typical range: {crowd_range[0]:,} - {crowd_range[2]:,}. This drives police deployment."
+            )
+            baseline["affected_people"] = expected_crowd
+            
         st.markdown("### Auto-estimated Inputs")
         st.markdown(f"""
         <div class='ops-card'>
-            <p class='label'>Traffic Flow · Affected People · Usual Police</p>
-            <p class='value'>{baseline['traffic_flow_index']} · {baseline['affected_people']:,} · {baseline['usual_police']}</p>
+            <p class='label'>Traffic Flow · Avg Speed · Affected People · Usual Police</p>
+            <p class='value'>{baseline['traffic_flow_index']} · {baseline.get('avg_speed_kmh', 15)} km/h · {baseline['affected_people']:,} · {baseline['usual_police']}</p>
             <p class='detail'>{baseline['historical_event_count']} similar local records used where available</p>
         </div>
         """, unsafe_allow_html=True)
@@ -761,7 +781,7 @@ with tab3:
             ax.set_ylim(0, 10)
             ax.axhline(y=5, color='#9aaabe', linestyle='--', alpha=0.6, label='Moderate')
             ax.set_title('Impact Scores Across Demo Cases')
-            _style_dark_chart(fig, ax, legend=True)
+            _style_light_chart(fig, ax, legend=True)
             plt.tight_layout()
             st.pyplot(fig)
         
@@ -775,7 +795,7 @@ with tab3:
             ax.set_xlabel('Case')
             ax.set_title('Recommended Officer Deployment')
             ax.set_ylim(0, 70)
-            _style_dark_chart(fig, ax)
+            _style_light_chart(fig, ax)
             plt.tight_layout()
             st.pyplot(fig)
         
@@ -810,7 +830,7 @@ with tab3:
             textprops={'color': '#eef2f7'},
         )
         ax.set_title('Diversion Level Distribution')
-        _style_dark_chart(fig, ax)
+        _style_light_chart(fig, ax)
         plt.tight_layout()
         st.pyplot(fig)
 
