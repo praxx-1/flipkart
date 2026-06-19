@@ -15,6 +15,28 @@ DATA_DIR = APP_DIR.parent / "data file"
 sys.path.insert(0, str(APP_DIR))
 from recommendation_engine import RecommendationEngine
 
+
+def _style_dark_chart(fig, ax, *, legend: bool = False) -> None:
+    """Apply dark-theme styling to matplotlib figures."""
+    panel = "#151c27"
+    text = "#eef2f7"
+    grid = "#2a3647"
+    fig.patch.set_facecolor("#0b0f14")
+    ax.set_facecolor(panel)
+    ax.tick_params(colors=text, labelcolor=text)
+    ax.xaxis.label.set_color(text)
+    ax.yaxis.label.set_color(text)
+    ax.title.set_color(text)
+    for spine in ax.spines.values():
+        spine.set_color(grid)
+    if legend:
+        leg = ax.get_legend()
+        if leg:
+            leg.get_frame().set_facecolor(panel)
+            leg.get_frame().set_edgecolor(grid)
+            for label in leg.get_texts():
+                label.set_color(text)
+
 # ============================================================================
 # PAGE CONFIGURATION
 # ============================================================================
@@ -26,17 +48,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS — force a readable light theme regardless of Streamlit system theme
+# Custom CSS — dark theme with high-contrast light text
 st.markdown("""
 <style>
     :root {
-        --surface: #ffffff;
-        --page: #f0f4f8;
-        --line: #c5d0dc;
-        --text: #0a1628;
-        --muted: #3d4f63;
-        --accent: #0f6b99;
-        --accent-soft: #dbeef7;
+        --page: #0b0f14;
+        --surface: #151c27;
+        --surface-hover: #1c2636;
+        --line: #2a3647;
+        --text: #eef2f7;
+        --muted: #9aaabe;
+        --accent: #4dabf7;
+        --accent-soft: #1a2d42;
     }
 
     /* App shell */
@@ -44,7 +67,8 @@ st.markdown("""
     [data-testid="stAppViewContainer"],
     [data-testid="stHeader"],
     section.main,
-    section[data-testid="stSidebar"] {
+    section[data-testid="stSidebar"],
+    header[data-testid="stHeader"] {
         background-color: var(--page) !important;
         color: var(--text) !important;
     }
@@ -62,11 +86,12 @@ st.markdown("""
     [data-testid="stMarkdownContainer"] em,
     [data-testid="stMarkdownContainer"] span,
     [data-testid="stCaptionContainer"] p,
+    [data-testid="stMarkdownContainer"] a,
     .stWrite, .stWrite p {
         color: var(--text) !important;
     }
 
-    /* Widget labels & values */
+    /* Widget labels & inputs */
     [data-testid="stWidgetLabel"] p,
     label[data-testid="stWidgetLabel"],
     [data-testid="stSelectbox"] label,
@@ -83,29 +108,42 @@ st.markdown("""
         color: var(--text) !important;
         border-color: var(--line) !important;
     }
+    [data-testid="stSelectbox"] [data-baseweb="select"] span,
+    [data-testid="stSelectbox"] [data-baseweb="select"] svg {
+        color: var(--text) !important;
+        fill: var(--text) !important;
+    }
     [data-testid="stTextArea"] textarea:disabled {
         -webkit-text-fill-color: var(--text) !important;
         color: var(--text) !important;
         opacity: 1 !important;
-        background-color: #eef2f6 !important;
+        background-color: var(--surface-hover) !important;
     }
-    [data-testid="stSlider"] [data-baseweb="slider"] div,
     [data-testid="stSlider"] [data-testid="stTickBarMin"],
-    [data-testid="stSlider"] [data-testid="stTickBarMax"] {
+    [data-testid="stSlider"] [data-testid="stTickBarMax"],
+    [data-testid="stSlider"] [data-baseweb="slider"] div {
         color: var(--text) !important;
     }
 
-    /* Dropdown popover (often invisible in dark theme) */
+    /* Dropdown popover */
     div[data-baseweb="popover"],
     div[data-baseweb="popover"] ul,
-    div[data-baseweb="popover"] li,
     div[data-baseweb="menu"] {
+        background-color: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+    }
+    div[data-baseweb="popover"] li,
+    div[data-baseweb="menu"] li,
+    div[data-baseweb="popover"] li span,
+    div[data-baseweb="menu"] li span {
         background-color: var(--surface) !important;
         color: var(--text) !important;
     }
     div[data-baseweb="popover"] li:hover,
-    div[data-baseweb="menu"] li:hover {
-        background-color: var(--accent-soft) !important;
+    div[data-baseweb="menu"] li:hover,
+    div[data-baseweb="popover"] li:hover span,
+    div[data-baseweb="menu"] li:hover span {
+        background-color: var(--surface-hover) !important;
         color: var(--text) !important;
     }
 
@@ -116,7 +154,7 @@ st.markdown("""
         background-color: transparent !important;
     }
     .stTabs [data-baseweb="tab"] {
-        background: #dce4ed !important;
+        background: var(--surface-hover) !important;
         border-radius: 6px 6px 0 0;
         padding: 12px 16px;
         color: var(--text) !important;
@@ -138,7 +176,7 @@ st.markdown("""
         border-radius: 8px;
         padding: 18px 18px 14px;
         min-height: 118px;
-        box-shadow: 0 1px 2px rgba(10, 22, 40, 0.06);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
     }
     [data-testid="stMetricLabel"] p,
     [data-testid="stMetricLabel"] {
@@ -150,8 +188,8 @@ st.markdown("""
         color: var(--text) !important;
         font-weight: 700 !important;
     }
-    [data-testid="stMetricDelta"] svg,
-    [data-testid="stMetricDelta"] {
+    [data-testid="stMetricDelta"],
+    [data-testid="stMetricDelta"] svg {
         color: var(--muted) !important;
     }
 
@@ -162,14 +200,14 @@ st.markdown("""
         border-radius: 8px;
         padding: 20px;
         min-height: 146px;
-        box-shadow: 0 1px 2px rgba(10, 22, 40, 0.06);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
     }
     .ops-card .label { color: var(--muted); font-size: 0.92rem; margin: 0 0 8px; font-weight: 600; }
     .ops-card .value { color: var(--text); font-size: 2.1rem; font-weight: 720; line-height: 1.05; margin: 0; }
     .ops-card .detail { color: var(--muted); font-size: 0.9rem; margin: 10px 0 0; }
     .context-row {
         background: var(--accent-soft);
-        border: 1px solid #9ecae0;
+        border: 1px solid #2d5575;
         border-radius: 8px;
         padding: 14px 16px;
         color: var(--text) !important;
@@ -177,32 +215,20 @@ st.markdown("""
     }
     .context-row b { color: var(--text) !important; }
 
-    /* Alerts — pastel backgrounds + dark text (fixes dark-theme bleed) */
-    [data-testid="stAlert"] {
+    /* Alerts — target Streamlit notification container (icon :has selectors miss current DOM) */
+    [data-testid="stAlert"],
+    [data-testid="stAlertContainer"],
+    [data-testid="stAlertContainer"] p,
+    [data-testid="stAlertContainer"] div,
+    [data-testid="stAlertContainer"] strong,
+    [data-testid="stAlertContainer"] span,
+    [data-baseweb="notification"] {
+        color: var(--text) !important;
         border-radius: 8px !important;
     }
-    [data-testid="stAlert"],
-    [data-testid="stAlert"] p,
-    [data-testid="stAlert"] div,
-    [data-testid="stAlert"] strong,
-    [data-testid="stAlert"] span {
-        color: var(--text) !important;
-    }
-    [data-testid="stAlert"]:has([data-testid="stAlertSuccessIcon"]) {
-        background-color: #d8f0de !important;
-        border: 1px solid #2d8a47 !important;
-    }
-    [data-testid="stAlert"]:has([data-testid="stAlertInfoIcon"]) {
-        background-color: #dbeef7 !important;
-        border: 1px solid #0f6b99 !important;
-    }
-    [data-testid="stAlert"]:has([data-testid="stAlertWarningIcon"]) {
-        background-color: #fff0cc !important;
-        border: 1px solid #b8860b !important;
-    }
-    [data-testid="stAlert"]:has([data-testid="stAlertErrorIcon"]) {
-        background-color: #fde0dc !important;
-        border: 1px solid #c0392b !important;
+    [data-testid="stAlertContainer"] {
+        background-color: var(--surface) !important;
+        border: 1px solid var(--line) !important;
     }
 
     /* Expander */
@@ -217,30 +243,72 @@ st.markdown("""
         border-radius: 8px;
     }
 
-    /* Dataframe */
-    [data-testid="stDataFrame"] div,
-    [data-testid="stDataFrame"] span,
+    /* Dataframe / table — hide Glide canvas overlay that paints low-contrast cells */
+    [data-testid="stDataFrame"] canvas {
+        display: none !important;
+    }
+    [data-testid="stDataFrame"] table,
+    [data-testid="stTable"] table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
     [data-testid="stDataFrame"] th,
-    [data-testid="stDataFrame"] td {
+    [data-testid="stDataFrame"] td,
+    [data-testid="stTable"] th,
+    [data-testid="stTable"] td {
         color: var(--text) !important;
         background-color: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        padding: 8px 12px !important;
+    }
+    [data-testid="stDataFrame"] th,
+    [data-testid="stTable"] th {
+        background-color: var(--surface-hover) !important;
+        font-weight: 650 !important;
+    }
+
+    /* Sliders, help icons, captions */
+    [data-testid="stSlider"] [data-testid="stThumbValue"],
+    [data-testid="stSlider"] [data-testid="stTickBarMin"],
+    [data-testid="stSlider"] [data-testid="stTickBarMax"] {
+        color: var(--text) !important;
+    }
+    [data-testid="stTooltipIcon"],
+    [data-testid="stHelpTooltipIcon"],
+    button[kind="headerNoPadding"] {
+        color: var(--muted) !important;
+    }
+    [data-testid="stCaptionContainer"] p {
+        color: #b8c5d6 !important;
+    }
+    [data-testid="stCheckbox"] label p,
+    [data-testid="stCheckbox"] span {
+        color: var(--text) !important;
+    }
+    div[data-testid="stMetric"] [data-testid="stMetricValue"],
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] * {
+        color: var(--text) !important;
     }
 
     /* Buttons */
-    div.stButton > button[kind="primary"],
-    div.stButton > button {
+    div.stButton > button,
+    [data-testid="stDownloadButton"] button {
         border-radius: 6px;
         min-height: 46px;
         font-weight: 650;
+        background-color: var(--surface) !important;
         color: var(--text) !important;
+        border: 1px solid var(--line) !important;
     }
-    div.stButton > button[kind="primary"] {
+    div.stButton > button[kind="primary"],
+    div.stButton > button[data-testid="baseButton-primary"] {
         background-color: var(--accent) !important;
-        color: #ffffff !important;
+        color: #0b0f14 !important;
         border: none !important;
     }
-    div.stButton > button[kind="primary"] p {
-        color: #ffffff !important;
+    div.stButton > button[kind="primary"] p,
+    div.stButton > button[data-testid="baseButton-primary"] p {
+        color: #0b0f14 !important;
     }
 
     /* Divider & footer */
@@ -577,7 +645,7 @@ with tab2:
         st.markdown("### 📋 Summary Table")
         summary_cols = ['Case', 'Name', 'Event_Cause', 'Corridor', 'Impact_Score', 
                        'Officers', 'Barricade_Level', 'Diversion_Level']
-        st.dataframe(demo_df[summary_cols], use_container_width=True)
+        st.table(demo_df[summary_cols])
         
         st.divider()
         
@@ -687,12 +755,13 @@ with tab3:
             fig, ax = plt.subplots(figsize=(8, 4))
             scores = demo_df['Impact_Score'].values
             colors = ['#FF6B6B' if s > 8 else '#FFA500' if s > 6 else '#4CAF50' for s in scores]
-            bars = ax.bar(range(len(scores)), scores, color=colors, alpha=0.7, edgecolor='black')
+            ax.bar(range(len(scores)), scores, color=colors, alpha=0.85, edgecolor='#2a3647')
             ax.set_ylabel('Impact Score')
             ax.set_xlabel('Case')
             ax.set_ylim(0, 10)
-            ax.axhline(y=5, color='gray', linestyle='--', alpha=0.5, label='Moderate')
+            ax.axhline(y=5, color='#9aaabe', linestyle='--', alpha=0.6, label='Moderate')
             ax.set_title('Impact Scores Across Demo Cases')
+            _style_dark_chart(fig, ax, legend=True)
             plt.tight_layout()
             st.pyplot(fig)
         
@@ -701,11 +770,12 @@ with tab3:
             fig, ax = plt.subplots(figsize=(8, 4))
             officers = demo_df['Officers'].values
             colors_off = ['#667eea' if o >= 50 else '#764ba2' for o in officers]
-            bars = ax.bar(range(len(officers)), officers, color=colors_off, alpha=0.7, edgecolor='black')
+            ax.bar(range(len(officers)), officers, color=colors_off, alpha=0.85, edgecolor='#2a3647')
             ax.set_ylabel('Number of Officers')
             ax.set_xlabel('Case')
             ax.set_title('Recommended Officer Deployment')
             ax.set_ylim(0, 70)
+            _style_dark_chart(fig, ax)
             plt.tight_layout()
             st.pyplot(fig)
         
@@ -732,9 +802,15 @@ with tab3:
         level_counts = demo_df['Diversion_Level'].value_counts()
         
         fig, ax = plt.subplots(figsize=(8, 4))
-        ax.pie(level_counts.values, labels=level_counts.index, autopct='%1.0f%%',
-               colors=['#FF6B6B', '#FFA500', '#4CAF50'])
+        ax.pie(
+            level_counts.values,
+            labels=level_counts.index,
+            autopct='%1.0f%%',
+            colors=['#FF6B6B', '#FFA500', '#4CAF50'],
+            textprops={'color': '#eef2f7'},
+        )
         ax.set_title('Diversion Level Distribution')
+        _style_dark_chart(fig, ax)
         plt.tight_layout()
         st.pyplot(fig)
 
