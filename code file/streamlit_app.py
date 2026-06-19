@@ -8,7 +8,11 @@ import pandas as pd
 import numpy as np
 import sys
 from datetime import datetime
-sys.path.insert(0, '.')
+from pathlib import Path
+
+APP_DIR = Path(__file__).resolve().parent
+DATA_DIR = APP_DIR.parent / "data file"
+sys.path.insert(0, str(APP_DIR))
 from recommendation_engine import RecommendationEngine
 
 # ============================================================================
@@ -22,62 +26,226 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS — force a readable light theme regardless of Streamlit system theme
 st.markdown("""
 <style>
     :root {
         --surface: #ffffff;
-        --page: #f7f9fc;
-        --line: #d9e2ec;
-        --text: #102033;
-        --muted: #5d6b7a;
+        --page: #f0f4f8;
+        --line: #c5d0dc;
+        --text: #0a1628;
+        --muted: #3d4f63;
         --accent: #0f6b99;
-        --accent-soft: #e8f4fa;
-        --warn-soft: #fff4df;
-        --danger-soft: #ffecec;
+        --accent-soft: #dbeef7;
     }
-    .stApp { background: var(--page); color: var(--text); }
-    .block-container { padding-top: 2.4rem; padding-bottom: 3rem; max-width: 1280px; }
-    h1, h2, h3 { color: var(--text); letter-spacing: 0; }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; border-bottom: 1px solid var(--line); }
+
+    /* App shell */
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stHeader"],
+    section.main,
+    section[data-testid="stSidebar"] {
+        background-color: var(--page) !important;
+        color: var(--text) !important;
+    }
+    .block-container {
+        padding-top: 2.4rem;
+        padding-bottom: 3rem;
+        max-width: 1280px;
+    }
+
+    /* Headings & body copy */
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li,
+    [data-testid="stMarkdownContainer"] strong,
+    [data-testid="stMarkdownContainer"] em,
+    [data-testid="stMarkdownContainer"] span,
+    [data-testid="stCaptionContainer"] p,
+    .stWrite, .stWrite p {
+        color: var(--text) !important;
+    }
+
+    /* Widget labels & values */
+    [data-testid="stWidgetLabel"] p,
+    label[data-testid="stWidgetLabel"],
+    [data-testid="stSelectbox"] label,
+    [data-testid="stNumberInput"] label,
+    [data-testid="stSlider"] label,
+    [data-testid="stCheckbox"] label p {
+        color: var(--text) !important;
+        font-weight: 650 !important;
+    }
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stTextArea"] textarea {
+        background-color: var(--surface) !important;
+        color: var(--text) !important;
+        border-color: var(--line) !important;
+    }
+    [data-testid="stTextArea"] textarea:disabled {
+        -webkit-text-fill-color: var(--text) !important;
+        color: var(--text) !important;
+        opacity: 1 !important;
+        background-color: #eef2f6 !important;
+    }
+    [data-testid="stSlider"] [data-baseweb="slider"] div,
+    [data-testid="stSlider"] [data-testid="stTickBarMin"],
+    [data-testid="stSlider"] [data-testid="stTickBarMax"] {
+        color: var(--text) !important;
+    }
+
+    /* Dropdown popover (often invisible in dark theme) */
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] ul,
+    div[data-baseweb="popover"] li,
+    div[data-baseweb="menu"] {
+        background-color: var(--surface) !important;
+        color: var(--text) !important;
+    }
+    div[data-baseweb="popover"] li:hover,
+    div[data-baseweb="menu"] li:hover {
+        background-color: var(--accent-soft) !important;
+        color: var(--text) !important;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        background-color: transparent !important;
+    }
     .stTabs [data-baseweb="tab"] {
-        background: transparent;
+        background: #dce4ed !important;
         border-radius: 6px 6px 0 0;
         padding: 12px 16px;
+        color: var(--text) !important;
     }
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] span {
+        color: var(--text) !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-bottom-color: var(--surface) !important;
+    }
+
+    /* Metrics */
     div[data-testid="stMetric"] {
-        background: var(--surface);
+        background: var(--surface) !important;
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 18px 18px 14px;
         min-height: 118px;
-        box-shadow: 0 1px 2px rgba(16, 32, 51, 0.04);
+        box-shadow: 0 1px 2px rgba(10, 22, 40, 0.06);
     }
+    [data-testid="stMetricLabel"] p,
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stMetricValue"],
+    [data-testid="stMetricValue"] div {
+        color: var(--text) !important;
+        font-weight: 700 !important;
+    }
+    [data-testid="stMetricDelta"] svg,
+    [data-testid="stMetricDelta"] {
+        color: var(--muted) !important;
+    }
+
+    /* Custom cards */
     .ops-card {
         background: var(--surface);
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 20px;
         min-height: 146px;
-        box-shadow: 0 1px 2px rgba(16, 32, 51, 0.04);
+        box-shadow: 0 1px 2px rgba(10, 22, 40, 0.06);
     }
-    .ops-card .label { color: var(--muted); font-size: 0.92rem; margin: 0 0 8px; }
+    .ops-card .label { color: var(--muted); font-size: 0.92rem; margin: 0 0 8px; font-weight: 600; }
     .ops-card .value { color: var(--text); font-size: 2.1rem; font-weight: 720; line-height: 1.05; margin: 0; }
     .ops-card .detail { color: var(--muted); font-size: 0.9rem; margin: 10px 0 0; }
     .context-row {
         background: var(--accent-soft);
-        border: 1px solid #c7e4f1;
+        border: 1px solid #9ecae0;
         border-radius: 8px;
         padding: 14px 16px;
-        color: var(--text);
+        color: var(--text) !important;
         margin-bottom: 10px;
     }
-    .small-note { color: var(--muted); font-size: 0.92rem; }
+    .context-row b { color: var(--text) !important; }
+
+    /* Alerts — pastel backgrounds + dark text (fixes dark-theme bleed) */
+    [data-testid="stAlert"] {
+        border-radius: 8px !important;
+    }
+    [data-testid="stAlert"],
+    [data-testid="stAlert"] p,
+    [data-testid="stAlert"] div,
+    [data-testid="stAlert"] strong,
+    [data-testid="stAlert"] span {
+        color: var(--text) !important;
+    }
+    [data-testid="stAlert"]:has([data-testid="stAlertSuccessIcon"]) {
+        background-color: #d8f0de !important;
+        border: 1px solid #2d8a47 !important;
+    }
+    [data-testid="stAlert"]:has([data-testid="stAlertInfoIcon"]) {
+        background-color: #dbeef7 !important;
+        border: 1px solid #0f6b99 !important;
+    }
+    [data-testid="stAlert"]:has([data-testid="stAlertWarningIcon"]) {
+        background-color: #fff0cc !important;
+        border: 1px solid #b8860b !important;
+    }
+    [data-testid="stAlert"]:has([data-testid="stAlertErrorIcon"]) {
+        background-color: #fde0dc !important;
+        border: 1px solid #c0392b !important;
+    }
+
+    /* Expander */
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] [data-testid="stMarkdownContainer"] p {
+        color: var(--text) !important;
+    }
+    [data-testid="stExpander"] details {
+        background: var(--surface) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 8px;
+    }
+
+    /* Dataframe */
+    [data-testid="stDataFrame"] div,
+    [data-testid="stDataFrame"] span,
+    [data-testid="stDataFrame"] th,
+    [data-testid="stDataFrame"] td {
+        color: var(--text) !important;
+        background-color: var(--surface) !important;
+    }
+
+    /* Buttons */
+    div.stButton > button[kind="primary"],
     div.stButton > button {
         border-radius: 6px;
         min-height: 46px;
         font-weight: 650;
+        color: var(--text) !important;
     }
+    div.stButton > button[kind="primary"] {
+        background-color: var(--accent) !important;
+        color: #ffffff !important;
+        border: none !important;
+    }
+    div.stButton > button[kind="primary"] p {
+        color: #ffffff !important;
+    }
+
+    /* Divider & footer */
+    hr { border-color: var(--line) !important; }
+    .small-note { color: var(--muted); font-size: 0.92rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,8 +258,8 @@ if 'engine' not in st.session_state:
 
 if 'demo_data' not in st.session_state:
     try:
-        st.session_state.demo_data = pd.read_csv('../data file/demo_cases_results.csv')
-    except:
+        st.session_state.demo_data = pd.read_csv(DATA_DIR / 'demo_cases_results.csv')
+    except Exception:
         st.session_state.demo_data = None
 
 # ============================================================================
@@ -121,7 +289,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 with tab1:
     st.markdown("## Live Congestion Assessment")
-    st.markdown("Enter the operating conditions to calculate a numeric impact score and deployment plan.")
+    st.markdown("Select the event and location. Traffic flow, affected people, spread, duration, and usual police deployment are estimated automatically.")
     
     col1, col2 = st.columns(2)
     
@@ -152,26 +320,14 @@ with tab1:
             help="Administrative zone"
         )
         
-        event_severity = st.slider(
-            "Event Severity Value",
-            min_value=0.0,
-            max_value=10.0,
-            value=5.0,
-            step=0.1,
-            help="Numeric seriousness of the event instead of Low/Medium/High"
-        )
-
-        crowd_size = st.number_input(
-            "Estimated Crowd / People Affected",
-            min_value=0,
-            max_value=100000,
-            value=500,
-            step=100,
-            help="People gathered, expected spectators, or commuters directly affected"
+        road_closure_choice = st.selectbox(
+            "Road Closure Status",
+            options=["Auto estimate", "Yes", "No"],
+            help="Use Auto estimate when closure status is not confirmed"
         )
     
     with col2:
-        st.markdown("### Time, Road & Flow")
+        st.markdown("### Time")
 
         event_hour = st.slider(
             "Event Hour",
@@ -181,49 +337,70 @@ with tab1:
             step=1,
             help="Hour of day in 24-hour format"
         )
-        
-        duration_hours = st.slider(
-            "Event Duration (hours)",
-            min_value=0.5,
-            max_value=12.0,
-            value=2.0,
-            step=0.5,
-            help="How long will the event last?"
-        )
-        
-        road_closure = st.checkbox(
-            "Road Closure Required?",
-            value=False,
-            help="Will the road need to be completely closed?"
-        )
 
-        affected_length_km = st.slider(
-            "Affected Road Length / Spread (km)",
-            min_value=0.2,
-            max_value=10.0,
-            value=1.5,
-            step=0.1,
-            help="How far the blockage, crowd, queue, or work zone is expected to spread"
-        )
+        baseline = st.session_state.engine.estimate_defaults(event_cause, corridor, event_hour)
+        st.markdown("### Auto-estimated Inputs")
+        st.markdown(f"""
+        <div class='ops-card'>
+            <p class='label'>Traffic Flow · Affected People · Usual Police</p>
+            <p class='value'>{baseline['traffic_flow_index']} · {baseline['affected_people']:,} · {baseline['usual_police']}</p>
+            <p class='detail'>{baseline['historical_event_count']} similar local records used where available</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-        use_live_flow = st.checkbox(
-            "Override corridor traffic profile",
-            value=False,
-            help="Use this when you have live traffic information for the selected road"
-        )
-
-        traffic_flow_index = st.slider(
-            "Current Traffic Flow Index",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.75,
-            step=0.01,
-            disabled=not use_live_flow,
-            help="0.00 = free flow, 1.00 = saturated"
-        )
-        
-        st.markdown("### Model Context")
-        st.info("Uses numeric event value, road capacity, local flow, queue spread, crowd size, closure status, and time of day.")
+    with st.expander("Advanced overrides"):
+        adv1, adv2, adv3 = st.columns(3)
+        with adv1:
+            override_severity = st.checkbox("Override event severity", value=False)
+            event_severity = st.slider(
+                "Event Severity Value",
+                min_value=0.0,
+                max_value=10.0,
+                value=float(baseline["base_impact_score"]),
+                step=0.1,
+                disabled=not override_severity,
+                help="Numeric seriousness of the event"
+            )
+            override_people = st.checkbox("Override affected people", value=False)
+            crowd_size = st.number_input(
+                "Affected People",
+                min_value=0,
+                max_value=250000,
+                value=int(baseline["affected_people"]),
+                step=100,
+                disabled=not override_people,
+            )
+        with adv2:
+            override_duration = st.checkbox("Override duration", value=False)
+            duration_hours = st.slider(
+                "Event Duration (hours)",
+                min_value=0.25,
+                max_value=24.0,
+                value=float(min(24.0, baseline["duration_hours"])),
+                step=0.25,
+                disabled=not override_duration,
+            )
+            override_spread = st.checkbox("Override spread", value=False)
+            affected_length_km = st.slider(
+                "Affected Road Length / Spread (km)",
+                min_value=0.2,
+                max_value=15.0,
+                value=float(min(15.0, baseline["spread_km"])),
+                step=0.1,
+                disabled=not override_spread,
+            )
+        with adv3:
+            override_flow = st.checkbox("Override traffic flow", value=False)
+            traffic_flow_index = st.slider(
+                "Current Traffic Flow Index",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(baseline["traffic_flow_index"]),
+                step=0.01,
+                disabled=not override_flow,
+            )
+            st.markdown("### Baseline Source")
+            st.caption(baseline["source_note"])
     
     # ====================================================================
     # PREDICTION SECTION
@@ -232,8 +409,16 @@ with tab1:
     st.divider()
     
     if st.button("🚀 Get Prediction & Recommendations", type="primary", use_container_width=True):
-        
-        base_impact_score = event_severity
+        base_impact_score = event_severity if override_severity else None
+        crowd_override = int(crowd_size) if override_people else None
+        duration_override = duration_hours if override_duration else None
+        spread_override = affected_length_km if override_spread else None
+        flow_override = traffic_flow_index if override_flow else None
+        closure_override = None
+        if road_closure_choice == "Yes":
+            closure_override = True
+        elif road_closure_choice == "No":
+            closure_override = False
         
         # Get recommendations
         recommendations = st.session_state.engine.recommend(
@@ -241,16 +426,17 @@ with tab1:
             event_type=event_cause,
             corridor=corridor,
             zone=zone,
-            duration_hours=duration_hours,
+            duration_hours=duration_override,
             hour=event_hour,
-            crowd_size=crowd_size,
-            road_closure=road_closure,
-            affected_length_km=affected_length_km,
-            live_traffic_index=traffic_flow_index if use_live_flow else None
+            crowd_size=crowd_override,
+            road_closure=closure_override,
+            affected_length_km=spread_override,
+            live_traffic_index=flow_override
         )
 
         impact_score = recommendations['impact_score']
         context = recommendations['context']
+        baseline = recommendations['baseline']
         
         # Display results
         st.markdown("---")
@@ -283,16 +469,18 @@ with tab1:
         
         st.divider()
 
-        st.markdown("### Context Factors")
-        ctx1, ctx2, ctx3, ctx4 = st.columns(4)
+        st.markdown("### Model Assumptions")
+        ctx1, ctx2, ctx3, ctx4, ctx5 = st.columns(5)
         with ctx1:
             st.markdown(f"<div class='context-row'><b>Event Value</b><br>{context['event_numeric_value']}/10</div>", unsafe_allow_html=True)
         with ctx2:
             st.markdown(f"<div class='context-row'><b>Traffic Flow</b><br>{context['traffic_flow_index']} / 1.00</div>", unsafe_allow_html=True)
         with ctx3:
-            st.markdown(f"<div class='context-row'><b>Road Capacity</b><br>{context['road_capacity_index']} / 1.00</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='context-row'><b>Affected People</b><br>{context['crowd_size']:,}</div>", unsafe_allow_html=True)
         with ctx4:
-            st.markdown(f"<div class='context-row'><b>Time Factor</b><br>{context['time_factor']}x</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='context-row'><b>Usual Police</b><br>{baseline['usual_police']} officers</div>", unsafe_allow_html=True)
+        with ctx5:
+            st.markdown(f"<div class='context-row'><b>History Used</b><br>{baseline['historical_event_count']} records</div>", unsafe_allow_html=True)
         
         # Recommendations
         st.markdown("## Police Deployment Recommendations")
@@ -305,7 +493,7 @@ with tab1:
             <div class='ops-card'>
                 <p class='label'>Officers</p>
                 <p class='value'>{manpower['recommended']}</p>
-                <p class='detail'>Range {manpower['min_officers']}-{manpower['max_officers']} · {manpower['level']}</p>
+                <p class='detail'>Range {manpower['min_officers']}-{manpower['max_officers']} · usual {manpower['usual_officers']}</p>
             </div>
             """, unsafe_allow_html=True)
         
@@ -578,9 +766,9 @@ with tab4:
     - Trained on 6,538 events
     
     **Phase 4:** Recommendation Engine
-    - Converts impact score to actionable recommendations
-    - Manpower deployment (5-70 officers)
-    - Barricade locations and traffic diversions
+    - Auto-estimates traffic flow, affected people, duration, spread, and usual police presence
+    - Combines road capacity, event type, time of day, closure probability, and historical records
+    - Produces officer deployment, barricade locations, diversions, setup time, and clearance time
     
     **Phase 5:** Dashboard (You are here)
     - Interactive interface for police
@@ -597,6 +785,7 @@ with tab4:
     - **Accuracy:** 95.5% (R² = 0.955)
     - **Error:** ±0.08/10 on impact score
     - **Features:** 19 engineered variables
+    - **Context layer:** Astram history + Bengaluru road/event baselines + published public-event context
     - **Training time:** ~30 seconds
     - **Prediction time:** <100ms per event
     
@@ -662,33 +851,25 @@ with tab5:
     - Min samples split: 10
     - Min samples leaf: 5
     
-    #### Recommendation Rules
+    #### Contextual Recommendation Layer
     
-    **Manpower Scaling:**
-    ```
-    Score 1-2:   5-10 officers
-    Score 3-4:   10-20 officers
-    Score 5-6:   20-35 officers
-    Score 7-8:   35-50 officers
-    Score 9-10:  50-70 officers
-    ```
+    The dashboard no longer requires an operator to type traffic flow or affected crowd. It estimates those values from:
+    - Corridor profile: traffic-flow index, road-capacity index, lanes, typical queue spread, response time
+    - Event profile: numeric event value, blockage factor, crowd load, police complexity, planned/unplanned status
+    - Historical Astram records: similar-event count, median duration, average impact, closure rate
+    - Time factor: peak commute, midday, night, and night gathering adjustments
+    - Published context: ORR/Silk Board congestion, Bengaluru Traffic Police structure, and large public-event crowd-control references
     
-    **Barricade Setup:**
+    **Officer deployment uses:**
     ```
-    Score ≤ 2:   No barricades
-    Score 3-4:   1 location (minimal)
-    Score 5-6:   2 locations (moderate)
-    Score 7-8:   3 locations (heavy)
-    Score > 8:   Full corridor (complete)
+    incident load + affected people + traffic pressure + closure impact
+    + expected queue spread + event police complexity + time-of-day factor
     ```
     
-    **Traffic Diversions:**
+    **Barricades and diversions use:**
     ```
-    Score ≤ 2:   Normal traffic
-    Score 3-4:   1 alternate route
-    Score 5-6:   2 alternate routes
-    Score 7-8:   3 alternate routes
-    Score > 8:   All available routes
+    contextual impact score + road closure + expected queue length
+    + corridor-specific junctions and alternate routes
     ```
     
     ### 📈 Performance Metrics

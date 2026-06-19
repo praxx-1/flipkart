@@ -3,7 +3,13 @@ PHASE 4: CONTEXTUAL RECOMMENDATION ENGINE
 Convert a numeric event impact score into deployable traffic-police actions.
 """
 
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, Optional
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - Streamlit requirements include pandas.
+    pd = None
 
 
 class RecommendationEngine:
@@ -71,9 +77,24 @@ class RecommendationEngine:
         self.web_context_sources = [
             "https://en.wikipedia.org/wiki/Outer_Ring_Road,_Bengaluru",
             "https://en.wikipedia.org/wiki/Silk_Board_junction",
+            "https://en.wikipedia.org/wiki/Bangalore_City_Traffic_Police",
+            "https://en.wikipedia.org/wiki/2025_Bengaluru_crowd_crush",
             "https://timesofindia.indiatimes.com/city/bengaluru/rain-disrupts-orr-traffic/articleshow/121736538.cms",
             "https://timesofindia.indiatimes.com/city/bengaluru/road-closures-fuel-hours-long-gridlock-on-bengalurus-outer-ring-road/articleshow/124612228.cms",
         ]
+        self.event_baselines = {
+            "vip_movement": {"affected_people": 3500, "duration_hours": 1.5, "spread_km": 3.0, "usual_police": 45},
+            "procession": {"affected_people": 6000, "duration_hours": 3.0, "spread_km": 4.0, "usual_police": 55},
+            "public_event": {"affected_people": 4500, "duration_hours": 3.0, "spread_km": 2.5, "usual_police": 38},
+            "accident": {"affected_people": 650, "duration_hours": 1.0, "spread_km": 1.4, "usual_police": 8},
+            "construction": {"affected_people": 1200, "duration_hours": 4.0, "spread_km": 2.0, "usual_police": 10},
+            "vehicle_breakdown": {"affected_people": 350, "duration_hours": 1.0, "spread_km": 0.9, "usual_police": 4},
+            "pot_hole": {"affected_people": 180, "duration_hours": 0.8, "spread_km": 0.5, "usual_police": 2},
+            "water_logging": {"affected_people": 1800, "duration_hours": 2.0, "spread_km": 2.2, "usual_police": 14},
+            "tree_fall": {"affected_people": 500, "duration_hours": 1.4, "spread_km": 1.1, "usual_police": 5},
+            "congestion": {"affected_people": 900, "duration_hours": 1.2, "spread_km": 1.6, "usual_police": 7},
+        }
+        self.historical_context = self._load_historical_context()
 
     def _road_profile(self, traffic_flow: float, capacity: float, lanes: int, spread_km: float, response_min: int, notes: str) -> Dict:
         return {
@@ -95,26 +116,126 @@ class RecommendationEngine:
             "notes": notes,
         }
 
+    def estimate_defaults(self, event_type: Optional[str], corridor: Optional[str], hour: Optional[int]) -> Dict:
+        event_key = event_type if event_type in self.event_profiles else "congestion"
+        corridor_key = corridor if corridor in self.location_profiles else "Non-corridor"
+        hour = 12 if hour is None else int(hour) % 24
+        event_defaults = self.event_baselines[event_key].copy()
+        road = self.location_profiles[corridor_key]
+        historical = self.historical_context.get((corridor_key, event_key)) or self.historical_context.get((corridor_key, None)) or {}
+
+        duration = historical.get("median_duration_hours", event_defaults["duration_hours"])
+        base_impact = historical.get("avg_impact_score", self.event_profiles[event_key]["event_value"])
+        road_closure_probability = historical.get("road_closure_rate", 0.65 if event_key in ("vip_movement", "procession") else 0.15)
+        event_count = historical.get("event_count", 0)
+
+        traffic_flow = road["traffic_flow_index"]
+        if 7 <= hour <= 10 or 16 <= hour <= 20:
+            traffic_flow += 0.08
+        elif 22 <= hour or hour <= 5:
+            traffic_flow -= 0.16
+        traffic_flow += min(0.08, event_count / 8000)
+        traffic_flow = round(max(0.2, min(0.99, traffic_flow)), 2)
+
+        affected_people = event_defaults["affected_people"]
+        if event_key in ("accident", "vehicle_breakdown", "congestion", "water_logging", "construction"):
+            affected_people = int(round(affected_people * (0.85 + traffic_flow)))
+        if corridor_key.startswith("ORR") or corridor_key in ("CBD-2", "Hosur Road"):
+            affected_people = int(round(affected_people * 1.25))
+        if 22 <= hour or hour <= 5 and event_key not in ("public_event", "procession", "vip_movement"):
+            affected_people = int(round(affected_people * 0.55))
+
+        spread = max(event_defaults["spread_km"], road["typical_spread_km"] * (0.45 + traffic_flow / 2))
+        if road_closure_probability >= 0.5:
+            spread *= 1.25
+
+        usual_police = event_defaults["usual_police"]
+        if event_key == "public_event" and corridor_key == "CBD-2":
+            usual_police = max(usual_police, 45)
+        if traffic_flow >= 0.9:
+            usual_police = int(round(usual_police * 1.25))
+
+        return {
+            "base_impact_score": round(max(0, min(10, base_impact)), 1),
+            "traffic_flow_index": traffic_flow,
+            "affected_people": max(0, affected_people),
+            "duration_hours": round(max(0.25, duration), 2),
+            "spread_km": round(max(0.2, spread), 1),
+            "road_closure_probability": round(max(0, min(1, road_closure_probability)), 2),
+            "usual_police": usual_police,
+            "historical_event_count": int(event_count),
+            "source_note": "Local Astram history + published Bengaluru traffic/crowd context; police counts are estimated when official deployment counts are not published.",
+        }
+
+    def _load_historical_context(self) -> Dict:
+        if pd is None:
+            return {}
+
+        data_path = Path(__file__).resolve().parents[1] / "data file" / "astram_with_impact_score.csv"
+        if not data_path.exists():
+            return {}
+
+        try:
+            df = pd.read_csv(data_path)
+        except Exception:
+            return {}
+
+        required = {"corridor", "event_cause", "duration_hours", "impact_score", "requires_road_closure"}
+        if not required.issubset(df.columns):
+            return {}
+
+        df = df.copy()
+        df["corridor"] = df["corridor"].fillna("Non-corridor")
+        df["event_cause"] = df["event_cause"].fillna("congestion")
+        df["duration_hours"] = pd.to_numeric(df["duration_hours"], errors="coerce").fillna(1.0).clip(0.25, 24)
+        df["impact_score"] = pd.to_numeric(df["impact_score"], errors="coerce").fillna(5.0).clip(0, 10)
+        df["requires_road_closure_bool"] = df["requires_road_closure"].astype(str).str.lower().isin(["true", "yes", "1"])
+
+        context = {}
+        for (corridor, cause), group in df.groupby(["corridor", "event_cause"], dropna=False):
+            context[(corridor, cause)] = {
+                "event_count": len(group),
+                "median_duration_hours": float(group["duration_hours"].median()),
+                "avg_impact_score": float(group["impact_score"].mean()),
+                "road_closure_rate": float(group["requires_road_closure_bool"].mean()),
+            }
+
+        for corridor, group in df.groupby("corridor", dropna=False):
+            context[(corridor, None)] = {
+                "event_count": len(group),
+                "median_duration_hours": float(group["duration_hours"].median()),
+                "avg_impact_score": float(group["impact_score"].mean()),
+                "road_closure_rate": float(group["requires_road_closure_bool"].mean()),
+            }
+
+        return context
+
     def recommend(
         self,
-        impact_score: float,
+        impact_score: Optional[float] = None,
         event_type: Optional[str] = None,
         corridor: Optional[str] = None,
         zone: Optional[str] = None,
         duration_hours: Optional[float] = None,
         hour: Optional[int] = None,
-        crowd_size: int = 0,
-        road_closure: bool = False,
+        crowd_size: Optional[int] = None,
+        road_closure: Optional[bool] = None,
         affected_length_km: Optional[float] = None,
         live_traffic_index: Optional[float] = None,
     ) -> Dict:
         event_type_clean = str(event_type).lower().strip() if event_type else "congestion"
         corridor_key = corridor if corridor in self.location_profiles else "Non-corridor"
-        duration_hours = duration_hours if duration_hours is not None else 1.0
         hour = 12 if hour is None else int(hour) % 24
 
         event_profile = self.event_profiles.get(event_type_clean, self.event_profiles["congestion"])
         road_profile = self.location_profiles[corridor_key]
+        baseline = self.estimate_defaults(event_type_clean, corridor_key, hour)
+        impact_score = baseline["base_impact_score"] if impact_score is None else impact_score
+        duration_hours = baseline["duration_hours"] if duration_hours is None else duration_hours
+        crowd_size = baseline["affected_people"] if crowd_size is None else crowd_size
+        road_closure = baseline["road_closure_probability"] >= 0.5 if road_closure is None else road_closure
+        affected_length_km = baseline["spread_km"] if affected_length_km is None else affected_length_km
+        live_traffic_index = baseline["traffic_flow_index"] if live_traffic_index is None else live_traffic_index
         context = self._contextual_assessment(
             base_score=impact_score,
             event_profile=event_profile,
@@ -126,6 +247,7 @@ class RecommendationEngine:
             affected_length_km=affected_length_km,
             live_traffic_index=live_traffic_index,
         )
+        context["usual_police"] = baseline["usual_police"]
 
         score = context["contextual_impact_score"]
         manpower = self._recommend_manpower(score, event_profile, road_profile, context)
@@ -143,6 +265,7 @@ class RecommendationEngine:
             "diversions": diversions,
             "setup_cleanup": timing,
             "context": context,
+            "baseline": baseline,
             "web_context_sources": self.web_context_sources,
             "summary": self._build_summary(score, manpower, barricades, timing, context, corridor_key, zone),
         }
@@ -238,6 +361,7 @@ class RecommendationEngine:
             "min_officers": min_officers,
             "max_officers": max_officers,
             "recommended": recommended,
+            "usual_officers": context.get("usual_police", recommended),
             "level": self._deployment_level(recommended),
             "needs_police": recommended >= 3,
             "description": (
