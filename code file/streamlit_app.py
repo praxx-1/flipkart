@@ -498,7 +498,14 @@ with tab1:
     
     if st.button("🚀 Get Prediction & Recommendations", type="primary", use_container_width=True):
         base_impact_score = event_severity if override_severity else None
-        crowd_override = int(crowd_size) if override_people else None
+        
+        if override_people:
+            crowd_override = int(crowd_size)
+        elif baseline.get("expected_crowd_range"):
+            crowd_override = int(expected_crowd)
+        else:
+            crowd_override = None
+            
         duration_override = duration_hours if override_duration else None
         spread_override = affected_length_km if override_spread else None
         flow_override = traffic_flow_index if override_flow else None
@@ -527,33 +534,27 @@ with tab1:
         baseline = recommendations['baseline']
         
         # Display results
-        st.markdown("---")
-        st.markdown("## Prediction Results")
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("## Impact Analysis & Prediction")
+        st.markdown("<br>", unsafe_allow_html=True)
         
-        # Impact score with visual gauge
-        col1, col2, col3 = st.columns(3)
+        # Spacious, text-heavy presentation instead of metric boxes
+        col1, col2 = st.columns(2)
         
         with col1:
-            st.metric(
-                "Contextual Impact Score",
-                f"{impact_score:.1f}/10",
-                delta=None,
-                delta_color="inverse"
-            )
+            st.markdown(f"### Score: **{impact_score:.1f} / 10**")
+            st.markdown(f"**Category:** {recommendations['category']}  \n"
+                        f"**Expected Queue:** {context['expected_queue_km']:.1f} km  \n"
+                        f"**Time Period:** {context['time_period']}")
         
         with col2:
-            st.metric(
-                "Category",
-                recommendations['category'],
-                delta=None
-            )
+            st.markdown("### Model Assumptions")
+            st.markdown(f"**Base Event Severity:** {context['event_numeric_value']}/10  \n"
+                        f"**Traffic Flow:** {context['traffic_flow_index']}  \n"
+                        f"**Affected People:** {context['crowd_size']:,}  \n"
+                        f"**Historical Records Used:** {baseline['historical_event_count']}")
         
-        with col3:
-            st.metric(
-                "Expected Queue",
-                f"{context['expected_queue_km']:.1f} km",
-                delta=f"{context['time_period']}"
-            )
+        st.markdown("<br>", unsafe_allow_html=True)
         
         # ========== ESCALATION ALERTS ==========
         if recommendations.get("escalation_required"):
@@ -581,20 +582,7 @@ with tab1:
                 for err in recommendations["validation_errors"]:
                     st.caption(f"• {err}")
 
-        st.divider()
-
-        st.markdown("### Model Assumptions")
-        ctx1, ctx2, ctx3, ctx4, ctx5 = st.columns(5)
-        with ctx1:
-            st.markdown(f"<div class='context-row'><b>Event Value</b><br>{context['event_numeric_value']}/10</div>", unsafe_allow_html=True)
-        with ctx2:
-            st.markdown(f"<div class='context-row'><b>Traffic Flow</b><br>{context['traffic_flow_index']} / 1.00</div>", unsafe_allow_html=True)
-        with ctx3:
-            st.markdown(f"<div class='context-row'><b>Affected People</b><br>{context['crowd_size']:,}</div>", unsafe_allow_html=True)
-        with ctx4:
-            st.markdown(f"<div class='context-row'><b>Usual Police</b><br>{baseline['usual_police']} officers</div>", unsafe_allow_html=True)
-        with ctx5:
-            st.markdown(f"<div class='context-row'><b>History Used</b><br>{baseline['historical_event_count']} records</div>", unsafe_allow_html=True)
+        st.markdown("<br><br>", unsafe_allow_html=True)
         
         # Recommendations
         st.markdown("## Police Deployment Recommendations")

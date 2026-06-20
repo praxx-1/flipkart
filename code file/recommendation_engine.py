@@ -312,7 +312,7 @@ class EscalationRulesEngine:
         escalations = []
         for rule_name, rule_config in EscalationRulesEngine.RULES.items():
             triggers = rule_config.get("triggers", [])
-            if all(trigger(context) for trigger in triggers):
+            if any(trigger(context) for trigger in triggers):
                 escalations.append((
                     rule_name,
                     rule_config["action"],
@@ -446,7 +446,7 @@ class RecommendationEngine:
         historical = self.historical_context.get((corridor_key, event_key)) or self.historical_context.get((corridor_key, None)) or {}
 
         duration = historical.get("median_duration_hours", event_defaults["duration_hours"])
-        base_impact = historical.get("avg_impact_score", self.event_profiles[event_key]["event_value"])
+        base_impact = self.event_profiles[event_key]["event_value"]
         road_closure_probability = historical.get("road_closure_rate", 0.65 if event_key in ("vip_movement", "procession") else 0.15)
         event_count = historical.get("event_count", 0)
 
@@ -609,6 +609,7 @@ class RecommendationEngine:
             road_closure=road_closure,
             affected_length_km=affected_length_km,
             live_traffic_index=live_traffic_index,
+            event_key=event_type_clean,
         )
         context["usual_police"] = baseline["usual_police"]
         context["hour"] = hour
@@ -719,6 +720,7 @@ class RecommendationEngine:
         road_closure: bool,
         affected_length_km: Optional[float],
         live_traffic_index: Optional[float],
+        event_key: str = "",
     ) -> Dict:
         base_score = max(0, min(10, float(base_score)))
         traffic_flow = road_profile["traffic_flow_index"] if live_traffic_index is None else max(0, min(1, live_traffic_index))
@@ -768,6 +770,15 @@ class RecommendationEngine:
             + spread_pressure
         ) * time_factor * night_gathering_factor
 
+        # Override contextual score for massive crowd events
+        if event_key in ("public_event", "vip_movement", "procession"):
+            if crowd_size >= 20000:
+                contextual_score = 10.0
+            elif crowd_size >= 2000:
+                contextual_score = max(contextual_score, 6.0 + ((crowd_size - 2000) / 18000.0) * 4.0)
+            elif crowd_size >= 1000:
+                contextual_score = max(6.0, contextual_score)
+
         contextual_score = round(max(0, min(10, contextual_score)), 1)
         expected_queue_km = round(max(0.3, spread_km * (0.55 + traffic_flow + capacity_pressure + (0.35 if road_closure else 0))), 1)
 
@@ -795,13 +806,11 @@ class RecommendationEngine:
         crowd = context.get("crowd_size", 0)
         
         # Linear crowd scaling based on event type
-        if crowd > 0:
-            if event_key == "public_event":
-                base = crowd / 160.0
-            elif event_key == "vip_movement":
-                base = crowd / 130.0
-            elif event_key == "procession":
-                base = crowd / 115.0
+        if crowd > 0 and event_key in ("public_event", "vip_movement", "procession"):
+            if crowd < 2000:
+                base = 10.0
+            else:
+                base = 10.0 + ((crowd - 2000) / 150.0)
                 
         # Scale based on time of day (timing factor 0.8 to 1.2)
         if context["time_period"] in ("Night", "Deep night") and crowd < 300:
