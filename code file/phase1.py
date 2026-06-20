@@ -6,7 +6,7 @@ print("PHASE 1: Y VARIABLE ENGINEERING")
 print("=" * 80)
 
 # Load raw Astram data
-df = pd.read_csv('../data/Astram event data_anonymized - Astram event data_anonymizedb40ac87.csv')
+df = pd.read_csv('../data file/Astram event data_anonymized - Astram event data_anonymizedb40ac87.csv')
 
 # Calculate duration if not present
 df['start_datetime'] = pd.to_datetime(df['start_datetime'], errors='coerce')
@@ -54,5 +54,5 @@ def calculate_impact_score(row):
 df['impact_score'] = df.apply(calculate_impact_score, axis=1)
 
 # Save the resulting dataset
-df.to_csv('../data/astram_with_impact_score.csv', index=False)
+df.to_csv('../data file/astram_with_impact_score.csv', index=False)
 print("Saved astram_with_impact_score.csv successfully.")

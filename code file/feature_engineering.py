@@ -16,7 +16,7 @@ print("=" * 80)
 # 1. LOAD DATA WITH Y VARIABLE
 # ============================================================================
 
-df = pd.read_csv('../data/astram_with_impact_score.csv')
+df = pd.read_csv('../data file/astram_with_impact_score.csv')
 print(f"\n✅ Loaded data: {df.shape}")
 print(f"Columns: {df.columns.tolist()}")
 
@@ -256,7 +256,7 @@ print("\n" + "=" * 80)
 print("SAVING OUTPUTS")
 print("=" * 80)
 
-output_dir = '../data/'
+output_dir = '../data file/'
 
 # Save features with target
 output_df = X.copy()

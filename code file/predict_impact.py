@@ -10,7 +10,7 @@ import pickle
 # LOAD SAVED MODEL & ARTIFACTS
 # ============================================================================
 
-output_dir = '../data/'
+output_dir = '../data file/'
 
 # Load model
 with open(f'{output_dir}random_forest_model.pkl', 'rb') as f:

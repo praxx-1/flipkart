@@ -19,7 +19,7 @@ print("=" * 80)
 
 print("\n✅ Loading Astram dataset...")
 
-df = pd.read_csv('../data/Astram event data_anonymized - Astram event data_anonymizedb40ac87.csv')
+df = pd.read_csv('../data file/Astram event data_anonymized - Astram event data_anonymizedb40ac87.csv')
 print(f"✅ Loaded: {df.shape[0]} events")
 
 # Parse datetime
@@ -224,7 +224,7 @@ print("\n" + "=" * 80)
 print("SAVING RESULTS")
 print("=" * 80)
 
-output_dir = '../data/'
+output_dir = '../data file/'
 
 if len(results) > 0:
     results_df = pd.DataFrame(results)

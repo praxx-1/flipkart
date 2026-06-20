@@ -22,7 +22,7 @@ print("PHASE 3: MODEL TRAINING")
 print("=" * 80)
 
 # Load features and target
-df = pd.read_csv('../data/features_for_modeling.csv')
+df = pd.read_csv('../data file/features_for_modeling.csv')
 print(f"\n✅ Loaded features: {df.shape}")
 
 # Prepare X and Y
@@ -189,7 +189,7 @@ print("\n" + "=" * 80)
 print("SAVING ARTIFACTS")
 print("=" * 80)
 
-output_dir = '../data/'
+output_dir = '../data file/'
 
 # Save Random Forest model
 with open(f'{output_dir}random_forest_model.pkl', 'wb') as f:
