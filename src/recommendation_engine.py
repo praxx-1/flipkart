@@ -523,7 +523,7 @@ class RecommendationEngine:
         if pd is None:
             return {}
 
-        data_path = Path(__file__).resolve().parents[1] / "data file" / "astram_with_impact_score.csv"
+        data_path = Path(__file__).resolve().parents[1] / "data" / "astram_with_impact_score.csv"
         if not data_path.exists():
             return {}
 

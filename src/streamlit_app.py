@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
-DATA_DIR = APP_DIR.parent / "data file"
+DATA_DIR = APP_DIR.parent / "data"
 sys.path.insert(0, str(APP_DIR))
 from recommendation_engine import RecommendationEngine
 
