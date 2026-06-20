@@ -392,39 +392,45 @@ class RecommendationEngine:
         }
 
     def _recommend_manpower(self, score: float, event_profile: Dict, road_profile: Dict, context: Dict) -> Dict:
-        # Strictly anchor to the baseline researched numbers (e.g. 0 for pothole, 25 for VIP)
         base = context.get("usual_police", 5)
         
-        # Scale based on time of day (Softened to avoid explosion)
-        if context["time_period"] in ("Night", "Deep night") and context["crowd_size"] < 300:
-            time_scale = 0.7
+        event_key = context.get("event_key", "")
+        crowd = context.get("crowd_size", 0)
+        
+        # Linear crowd scaling based on event type
+        if crowd > 0:
+            if event_key == "public_event":
+                base = max(base, crowd / 160.0)
+            elif event_key == "vip_movement":
+                base = max(base, crowd / 130.0)
+            elif event_key == "procession":
+                base = max(base, crowd / 115.0)
+                
+        # Scale based on time of day (timing factor 0.8 to 1.2)
+        if context["time_period"] in ("Night", "Deep night") and crowd < 300:
+            time_scale = 0.8
         elif context["time_period"] in ("Night", "Deep night"):
             time_scale = 1.1
         elif context["time_period"] in ("Morning peak", "Evening peak"):
-            time_scale = 1.15
+            time_scale = 1.2
         else:
             time_scale = 1.0
 
-        # Scale based on traffic severity (Softened)
-        traffic_scale = 1.0 + max(0, (context["traffic_flow_index"] - 0.5) * 0.2)
+        # Scale based on location / traffic flow
+        traffic_scale = 1.0 + max(0, (context["traffic_flow_index"] - 0.5) * 0.4)
+        
+        # Apply a location factor if it's a known heavy corridor
+        location_factor = 1.2 if "ORR" in context.get("corridor", "") or "CBD" in context.get("corridor", "") else 1.0
 
-        # Scale based on crowd for planned events (Linear + dampened, not exponential)
-        crowd_scale = 1.0
-        if event_profile["planned"] and context["crowd_size"] > 0:
-            if context["crowd_size"] > 2000:
-                # E.g. 50,000 / 10,000 = 5 -> scale is 1.0 + (5 * 0.15) = 1.75
-                # A huge crowd adds 75% more baseline officers, instead of an exponential 400% jump
-                crowd_scale = 1.0 + (min(context["crowd_size"], 50000) / 10000.0) * 0.15
-
-        raw = base * time_scale * traffic_scale * crowd_scale
+        raw = base * time_scale * traffic_scale * location_factor
         
         # Add small strict additions for chaos factors
         if context["road_closure"]:
-            raw += 3
-        raw += min(5, context["expected_queue_km"] * 0.3)
+            raw += 5
+        raw += min(10, context["expected_queue_km"] * 0.5)
         
-        # Max cap of 120 ensures extremely severe outliers don't break reality
-        recommended = int(round(max(0, min(120, raw))))
+        # Remove the artificial hard cap so linear crowds can properly scale to hundreds if needed
+        recommended = int(round(max(0, raw)))
         
         min_officers = max(0, int(round(recommended * 0.75)))
         max_officers = int(round(recommended * 1.30))
