@@ -555,6 +555,32 @@ with tab1:
                 delta=f"{context['time_period']}"
             )
         
+        # ========== ESCALATION ALERTS ==========
+        if recommendations.get("escalation_required"):
+            for esc in recommendations.get("escalations", []):
+                alert_type = esc.get("notification", {}).get("alert_type", "WARNING")
+                if alert_type == "EMERGENCY":
+                    st.error(f"🆘 **EMERGENCY PROTOCOL ACTIVATED** — {esc['action']}")
+                elif alert_type == "CRITICAL":
+                    st.error(f"🚨 **CRITICAL ESCALATION** — {esc['action']}  \nNotify: {esc.get('notification', {}).get('sms', 'N/A')}")
+                elif alert_type == "URGENT":
+                    st.warning(f"⚠️ **ESCALATION TRIGGERED** — {esc['action']}  \nNotify: {esc.get('notification', {}).get('sms', 'N/A')}")
+                else:
+                    st.info(f"ℹ️ {esc['action']}")
+        
+        # ========== CONFLICT WARNINGS ==========
+        conflicts = recommendations.get("conflicts", {})
+        if conflicts.get("corridor_conflicts"):
+            st.warning(f"⚠️ **Corridor Conflict Detected** — {len(conflicts['corridor_conflicts'])} other active event(s) on this corridor. Resolution: {conflicts.get('conflict_resolution', {}).get('action', 'Escalate')}")
+        if conflicts.get("manpower_shortage"):
+            st.error(f"🚨 **Manpower Shortage** — Zone demand exceeds available capacity (200 officers). Requesting mutual aid from adjacent zones.")
+        
+        # ========== VALIDATION WARNINGS ==========
+        if recommendations.get("validation_errors"):
+            with st.expander("⚠️ Input Validation Warnings", expanded=False):
+                for err in recommendations["validation_errors"]:
+                    st.caption(f"• {err}")
+
         st.divider()
 
         st.markdown("### Model Assumptions")
