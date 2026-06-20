@@ -400,11 +400,11 @@ class RecommendationEngine:
         # Linear crowd scaling based on event type
         if crowd > 0:
             if event_key == "public_event":
-                base = max(base, crowd / 160.0)
+                base = crowd / 160.0
             elif event_key == "vip_movement":
-                base = max(base, crowd / 130.0)
+                base = crowd / 130.0
             elif event_key == "procession":
-                base = max(base, crowd / 115.0)
+                base = crowd / 115.0
                 
         # Scale based on time of day (timing factor 0.8 to 1.2)
         if context["time_period"] in ("Night", "Deep night") and crowd < 300:
