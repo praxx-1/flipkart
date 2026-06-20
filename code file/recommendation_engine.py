@@ -257,7 +257,7 @@ class EscalationRulesEngine:
     RULES = {
         "zone_to_city": {
             "triggers": [
-                lambda ctx: ctx["impact_score"] >= 7.5,
+                lambda ctx: ctx["impact_score"] >= 8.0,
                 lambda ctx: ctx["expected_queue_km"] >= 5,
                 lambda ctx: ctx["affected_people"] >= 5000,
             ],
@@ -269,8 +269,8 @@ class EscalationRulesEngine:
         },
         "city_to_state": {
             "triggers": [
-                lambda ctx: ctx["impact_score"] >= 8.5,
-                lambda ctx: ctx["road_closure"] is True,
+                lambda ctx: ctx["impact_score"] >= 9.0,
+                lambda ctx: (ctx["road_closure"] is True and ctx["impact_score"] >= 8.0),
                 lambda ctx: ctx["manpower_needed"] > 150,
             ],
             "action": "ESCALATE_TO_STATE_POLICE",
@@ -282,7 +282,7 @@ class EscalationRulesEngine:
         },
         "emergency_protocol": {
             "triggers": [
-                lambda ctx: ctx["impact_score"] >= 9.0,
+                lambda ctx: ctx["impact_score"] >= 9.5,
                 lambda ctx: ctx["expected_queue_km"] >= 8,
             ],
             "action": "ACTIVATE_EMERGENCY_PROTOCOL",
@@ -778,9 +778,25 @@ class RecommendationEngine:
                 contextual_score = max(contextual_score, 6.0 + ((crowd_size - 2000) / 18000.0) * 4.0)
             elif crowd_size >= 1000:
                 contextual_score = max(6.0, contextual_score)
+        else:
+            # Scale down score for non-crowd events based on affected people
+            if crowd_size < 100:
+                contextual_score = min(contextual_score, 4.0)
+            elif crowd_size < 500:
+                contextual_score = min(contextual_score, 5.5)
+            elif crowd_size < 2000:
+                contextual_score = min(contextual_score, 7.0)
+            elif event_key != "accident":
+                # Cap non-crowd, non-accident events at 8.5 max
+                contextual_score = min(contextual_score, 8.5)
 
         contextual_score = round(max(0, min(10, contextual_score)), 1)
         expected_queue_km = round(max(0.3, spread_km * (0.55 + traffic_flow + capacity_pressure + (0.35 if road_closure else 0))), 1)
+        
+        # Cap queue for minor events to prevent unwarranted escalations
+        if event_key in ("pot_hole", "water_logging", "construction", "congestion", "vehicle_breakdown", "tree_fall"):
+            expected_queue_km = min(expected_queue_km, 1.5)
+
 
         return {
             "event_numeric_value": event_profile["event_value"],
@@ -804,39 +820,77 @@ class RecommendationEngine:
         
         event_key = context.get("event_key", "")
         crowd = context.get("crowd_size", 0)
+        hour = context.get("hour", 12)
         
-        # Linear crowd scaling based on event type
-        if crowd > 0 and event_key in ("public_event", "vip_movement", "procession"):
-            if crowd < 2000:
-                base = 10.0
+        # ============================================================
+        # Category 1: Minor infrastructure events
+        # pot_hole, water_logging, construction, congestion
+        # Max cap: 4 officers. Night (22:00–05:00): 0 officers.
+        # ============================================================
+        minor_infra_events = ("pot_hole", "water_logging", "construction", "congestion")
+        
+        # Category 2: Medium disruptions
+        # vehicle_breakdown, tree_fall
+        # Max cap: 7 officers. Night (22:00–05:00): 0 officers.
+        medium_disruption_events = ("vehicle_breakdown", "tree_fall")
+        
+        # Category 3: Accidents — scale by score, no cap but proportional
+        # Category 4: Crowd events (public_event, vip_movement, procession) — linear crowd scaling
+        
+        is_night = (hour >= 22 or hour < 5)
+        
+        if event_key in minor_infra_events:
+            if is_night:
+                recommended = 0
             else:
-                base = 10.0 + ((crowd - 2000) / 150.0)
+                # Scale 1–4 based on score (0–10)
+                recommended = max(1, min(4, int(round(score / 2.5))))
                 
-        # Scale based on time of day (timing factor 0.8 to 1.2)
-        if context["time_period"] in ("Night", "Deep night") and crowd < 300:
-            time_scale = 0.8
-        elif context["time_period"] in ("Night", "Deep night"):
-            time_scale = 1.1
-        elif context["time_period"] in ("Morning peak", "Evening peak"):
-            time_scale = 1.2
+        elif event_key in medium_disruption_events:
+            if is_night:
+                recommended = 0
+            else:
+                # Scale 2–7 based on score (0–10)
+                recommended = max(2, min(7, int(round(score * 0.7))))
+                
+        elif event_key == "accident":
+            if is_night and score < 7:
+                # Minor accidents at night — minimal presence
+                recommended = max(2, int(round(score * 0.5)))
+            else:
+                # Accidents scale proportionally with score
+                # Score 4 → ~4 officers, Score 7 → ~8, Score 10 → ~15
+                recommended = max(2, int(round(score * 1.5)))
+                
+        elif event_key in ("public_event", "vip_movement", "procession"):
+            # Linear crowd scaling — no upper limit
+            if crowd > 0:
+                if crowd < 2000:
+                    base = 10.0
+                else:
+                    base = 10.0 + ((crowd - 2000) / 150.0)
+            
+            # Apply time and location multipliers for crowd events
+            if context["time_period"] in ("Night", "Deep night") and crowd < 300:
+                time_scale = 0.8
+            elif context["time_period"] in ("Night", "Deep night"):
+                time_scale = 1.1
+            elif context["time_period"] in ("Morning peak", "Evening peak"):
+                time_scale = 1.2
+            else:
+                time_scale = 1.0
+            
+            traffic_scale = 1.0 + max(0, (context["traffic_flow_index"] - 0.5) * 0.4)
+            location_factor = 1.2 if "ORR" in context.get("corridor", "") or "CBD" in context.get("corridor", "") else 1.0
+            
+            raw = base * time_scale * traffic_scale * location_factor
+            if context["road_closure"]:
+                raw += 5
+            raw += min(10, context["expected_queue_km"] * 0.5)
+            recommended = int(round(max(0, raw)))
         else:
-            time_scale = 1.0
-
-        # Scale based on location / traffic flow
-        traffic_scale = 1.0 + max(0, (context["traffic_flow_index"] - 0.5) * 0.4)
-        
-        # Apply a location factor if it's a known heavy corridor
-        location_factor = 1.2 if "ORR" in context.get("corridor", "") or "CBD" in context.get("corridor", "") else 1.0
-
-        raw = base * time_scale * traffic_scale * location_factor
-        
-        # Add small strict additions for chaos factors
-        if context["road_closure"]:
-            raw += 5
-        raw += min(10, context["expected_queue_km"] * 0.5)
-        
-        # Remove the artificial hard cap so linear crowds can properly scale to hundreds if needed
-        recommended = int(round(max(0, raw)))
+            # Fallback for any unknown event type
+            recommended = max(2, int(round(score * 0.8)))
         
         min_officers = max(0, int(round(recommended * 0.75)))
         max_officers = int(round(recommended * 1.30))
@@ -847,7 +901,7 @@ class RecommendationEngine:
             "recommended": recommended,
             "usual_officers": context.get("usual_police", recommended),
             "level": self._deployment_level(recommended),
-            "needs_police": recommended >= 3,
+            "needs_police": recommended >= 1,
             "description": (
                 f"{event_profile['notes']} Deployment includes junction control, queue protection, "
                 f"and {context['expected_queue_km']} km downstream monitoring."
@@ -856,10 +910,11 @@ class RecommendationEngine:
 
     def _recommend_barricades(self, score: float, corridor: str, event_profile: Dict, context: Dict) -> Dict:
         points = self.barricade_points.get(corridor, self.barricade_points["Non-corridor"])
-        if event_profile["event_value"] <= 3 and not context["road_closure"] and score < 5:
+        if score < 7.0 and not context["road_closure"]:
             count = 0
         else:
-            count = 1 + int(score >= 5.5) + int(score >= 7.2) + int(context["road_closure"]) + int(context["expected_queue_km"] >= 4)
+            count = int(score >= 7.5) + int(score >= 8.5) + int(context["road_closure"]) + int(context["expected_queue_km"] >= 4)
+            count = max(1, count) if count > 0 else 0
             count = min(len(points), count)
 
         if count == 0:
