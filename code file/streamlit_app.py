@@ -322,17 +322,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# INITIALIZE SESSION STATE
+# INITIALIZE CACHE & SESSION STATE
 # ============================================================================
 
+@st.cache_resource(show_spinner="Initializing Traffic Engine...")
+def get_engine():
+    return RecommendationEngine()
+
+@st.cache_data(show_spinner="Loading Historical Demo Data...")
+def load_demo_data():
+    try:
+        return pd.read_csv(DATA_DIR / 'demo_cases_results.csv')
+    except Exception:
+        return None
+
 if 'engine' not in st.session_state:
-    st.session_state.engine = RecommendationEngine()
+    st.session_state.engine = get_engine()
 
 if 'demo_data' not in st.session_state:
-    try:
-        st.session_state.demo_data = pd.read_csv(DATA_DIR / 'demo_cases_results.csv')
-    except Exception:
-        st.session_state.demo_data = None
+    st.session_state.demo_data = load_demo_data()
 
 # ============================================================================
 # HEADER

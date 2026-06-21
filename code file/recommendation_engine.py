@@ -7,6 +7,7 @@ Production-ready for Bengaluru Traffic Police operations.
 
 import json
 import logging
+import functools
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
@@ -398,15 +399,15 @@ class RecommendationEngine:
         # and NYE 2025 deployment data (~20 police per 1,000 crowd).
         # expected_crowd_range: (low, typical, high) for planned events where crowd can be estimated.
         self.event_baselines = {
-            "vip_movement": {"affected_people": 3500, "duration_hours": 1.5, "spread_km": 3.0, "usual_police": 25, "expected_crowd_range": (2000, 5000, 20000)},
+            "vip_movement": {"affected_people": 3500, "duration_hours": 1.5, "spread_km": 3.0, "usual_police": 20, "expected_crowd_range": (2000, 5000, 20000)},
             "procession": {"affected_people": 6000, "duration_hours": 3.0, "spread_km": 4.0, "usual_police": 30, "expected_crowd_range": (5000, 15000, 100000)},
-            "public_event": {"affected_people": 4500, "duration_hours": 3.0, "spread_km": 2.5, "usual_police": 25, "expected_crowd_range": (5000, 20000, 45000)},
-            "accident": {"affected_people": 650, "duration_hours": 1.0, "spread_km": 1.4, "usual_police": 8, "expected_crowd_range": None},
-            "construction": {"affected_people": 1200, "duration_hours": 4.0, "spread_km": 2.0, "usual_police": 6, "expected_crowd_range": None},
+            "public_event": {"affected_people": 4500, "duration_hours": 3.0, "spread_km": 2.5, "usual_police": 20, "expected_crowd_range": (5000, 20000, 45000)},
+            "accident": {"affected_people": 650, "duration_hours": 1.0, "spread_km": 1.4, "usual_police": 4, "expected_crowd_range": None},
+            "construction": {"affected_people": 1200, "duration_hours": 4.0, "spread_km": 2.0, "usual_police": 4, "expected_crowd_range": None},
             "vehicle_breakdown": {"affected_people": 350, "duration_hours": 1.0, "spread_km": 0.9, "usual_police": 4, "expected_crowd_range": None},
             "pot_hole": {"affected_people": 180, "duration_hours": 0.8, "spread_km": 0.5, "usual_police": 0, "expected_crowd_range": None},
-            "water_logging": {"affected_people": 1800, "duration_hours": 2.0, "spread_km": 2.2, "usual_police": 12, "expected_crowd_range": None},
-            "tree_fall": {"affected_people": 500, "duration_hours": 1.4, "spread_km": 1.1, "usual_police": 5, "expected_crowd_range": None},
+            "water_logging": {"affected_people": 1800, "duration_hours": 2.0, "spread_km": 2.2, "usual_police": 8, "expected_crowd_range": None},
+            "tree_fall": {"affected_people": 500, "duration_hours": 1.4, "spread_km": 1.1, "usual_police": 4, "expected_crowd_range": None},
             "congestion": {"affected_people": 1200, "duration_hours": 1.0, "spread_km": 1.8, "usual_police": 4, "expected_crowd_range": None},
         }
         self.historical_context = self._load_historical_context()
@@ -437,6 +438,7 @@ class RecommendationEngine:
             "notes": notes,
         }
 
+    @functools.lru_cache(maxsize=128)
     def estimate_defaults(self, event_type: Optional[str], corridor: Optional[str], hour: Optional[int], zone: Optional[str] = None) -> Dict:
         event_key = event_type if event_type in self.event_profiles else "congestion"
         corridor_key = corridor if corridor in self.location_profiles else "Non-corridor"
